@@ -670,96 +670,97 @@ function copyClassNotice() {
     });
 }
 
-async function getBase64QR(url) {
-    try {
-        const res = await fetch(url);
-        const blob = await res.blob();
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.readAsDataURL(blob);
-        });
-    } catch (e) {
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        try {
-            const pRes = await fetch(proxyUrl);
-            const pBlob = await pRes.blob();
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onloadend = () => resolve(reader.result);
-                reader.readAsDataURL(pBlob);
-            });
-        } catch (e2) { return url; }
-    }
-}
-
-async function showClassQRList() {
+// ================= XUẤT PHIẾU THU PDF HÀNG LOẠT (TỐI ƯU CHO ZALO) =================
+function showClassQRList() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp!", "error");
     
     let cls = db.classes.find(c => c.id == cid);
-    let data = getTuitionData(cid).filter(d => !d.isPaid);
-    let grid = document.getElementById('qr-grid-container'); if(!grid) return;
+    let data = getTuitionData(cid).filter(d => !d.isPaid); // Chỉ tạo phiếu cho những bạn CHƯA NỘP
     
-    document.getElementById('qr-export-title').innerText = `BẢNG MÃ QR HỌC PHÍ - ${cls.name.toUpperCase()}`;
-    grid.innerHTML = '';
-    
-    if(data.length === 0) {
-        grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px; color:#64748b; font-weight:600;">Tất cả học sinh trong nhóm đã nộp học phí! 🎉</div>';
-        openModal('modal-qr-list');
-    } else {
-        openModal('modal-qr-list'); 
-        showLoading(true, "AI đang nạp ảnh QR chống lỗi..."); 
-        
-        let htmlContent = "";
-        for(let i=0; i<data.length; i++) {
-            let d = data[i];
-            let qrBase64 = await getBase64QR(d.qrLink); 
-            htmlContent += `
-                <div style="background: white; border-radius: 12px; padding: 15px; text-align: center; border: 2px solid #f1f5f9; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
-                    <b style="font-size: 1rem; color: #0f172a; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 5px;">${d.stu.name}</b>
-                    <p style="font-size: 1.15rem; color: #ef4444; font-weight: 900; margin-bottom: 12px;">${d.finalAmount.toLocaleString()}đ</p>
-                    <img src="${qrBase64}" style="width: 100%; max-width: 180px; border-radius: 8px; border: 1px solid #e2e8f0; padding: 4px; background: white;">
-                </div>`;
-        }
-        grid.innerHTML = htmlContent;
-        showLoading(false); 
-    }
-}
+    if(data.length === 0) return showToast("Tất cả học sinh lớp này đã nộp đủ! 🎉", "success");
 
-function taiAnhQRCaLop() {
-    const exportArea = document.getElementById('qr-export-area');
-    const clsName = document.getElementById('qr-export-title').innerText.replace('BẢNG MÃ QR HỌC PHÍ - ', '');
-    
-    showLoading(true, "AI đang xử lý ghép ảnh, vui lòng đợi...");
-    
-    const originalMaxHeight = exportArea.style.maxHeight;
-    const originalOverflow = exportArea.style.overflow;
-    exportArea.style.maxHeight = 'none';
-    exportArea.style.overflow = 'visible';
+    showToast("Đang tạo Phiếu báo PDF, vui lòng đợi...");
 
-    setTimeout(() => {
-        html2canvas(exportArea, {
-            useCORS: true,       
-            scale: 2,            
-            backgroundColor: "#ffffff"
-        }).then(canvas => {
-            exportArea.style.maxHeight = originalMaxHeight;
-            exportArea.style.overflow = originalOverflow;
-
-            const link = document.createElement('a');
-            let thangHienTai = new Date().getMonth() + 1;
-            link.download = `ToanMatsuda_QR_HocPhi_${clsName}_T${thangHienTai}.png`;
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+    // Mở một tab mới để tạo tài liệu in
+    let printWindow = window.open('', '_blank');
+    let thangHienTai = new Date().getMonth() + 1;
+    
+    let html = `
+    <html>
+    <head>
+        <title>Phieu_Thu_Hoc_Phi_${cls.name}_Thang${thangHienTai}</title>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800;900&display=swap" rel="stylesheet">
+        <style>
+            body { font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; padding: 0; background: #e2e8f0; }
+            /* Cài đặt mỗi học sinh là 1 trang in */
+            .page { page-break-after: always; width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center; background: white; }
+            .invoice-box { border: 2px dashed #cbd5e1; border-radius: 20px; padding: 40px; text-align: center; width: 90%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
+            .header { color: #1e3a8a; font-size: 24px; font-weight: 900; margin-bottom: 5px; text-transform: uppercase; }
+            .sub-header { color: #64748b; font-size: 15px; margin-bottom: 30px; font-weight: 600; }
+            .student-name { font-size: 32px; color: #0f172a; font-weight: 900; margin-bottom: 15px; text-transform: capitalize; }
+            .amount { font-size: 42px; color: #ef4444; font-weight: 900; margin: 15px 0; }
+            .details { text-align: left; background: #f8fafc; padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; font-size: 15px; color: #334155; border: 1px solid #e2e8f0; }
+            .qr-container img { width: 260px; height: 260px; border-radius: 16px; border: 1px solid #e2e8f0; padding: 10px; background: white; }
+            .footer-text { margin-top: 25px; font-size: 14px; color: #64748b; font-weight: 600; line-height: 1.5; }
             
-            showLoading(false);
-            showToast("✅ Đã tải ảnh thành công! Hãy gửi vào nhóm Zalo.");
-        }).catch(err => {
-            showLoading(false);
-            showToast("❌ Lỗi khi xuất ảnh: " + err.message, "error");
-        });
-    }, 500);
+            /* Tắt background thừa khi lưu PDF */
+            @media print {
+                body { background: white; }
+                .invoice-box { border: 2px dashed #cbd5e1; box-shadow: none; width: 100%; max-width: none; margin: 0 auto; }
+            }
+        </style>
+    </head>
+    <body>
+    `;
+
+    // Lặp qua từng học sinh chưa nộp để tạo trang
+    data.forEach(d => {
+        let discountHtml = d.discountCount > 0 
+            ? `<div style="color:#ef4444; margin-top:8px; font-weight:800;">Trừ (${d.discountText}): -${d.discountFee.toLocaleString()}đ</div>` 
+            : '';
+        
+        html += `
+        <div class="page">
+            <div class="invoice-box">
+                <div class="header">THÔNG BÁO HỌC PHÍ</div>
+                <div class="sub-header">Nhóm lớp: <b>${cls.name}</b> • Kỳ thu: <b>${d.cycleNum}</b></div>
+                
+                <div class="student-name">${d.stu.name}</div>
+                
+                <div class="details">
+                    <div><strong>Học phí gốc:</strong> ${d.upfrontFee.toLocaleString()}đ (${d.cycleSessions} buổi)</div>
+                    ${discountHtml}
+                </div>
+                
+                <div class="amount">${d.finalAmount.toLocaleString()}đ</div>
+                
+                <div class="qr-container">
+                    <img src="${d.qrLink}" alt="QR Code">
+                </div>
+                
+                <div class="footer-text">
+                    📌 Phụ huynh vui lòng lưu ảnh mã QR trên và dùng App Ngân hàng quét để thanh toán tự động.<br>
+                    <span style="color:#ef4444;">(Cú pháp đã được tạo sẵn, KHÔNG thay đổi nội dung CK)</span>
+                </div>
+            </div>
+        </div>
+        `;
+    });
+
+    // Tự động bật hộp thoại In/Lưu PDF sau 1.5 giây (Chờ load xong ảnh QR)
+    html += `
+        <script>
+            setTimeout(() => { 
+                window.print(); 
+            }, 1500); 
+        </script>
+    </body>
+    </html>
+    `;
+
+    printWindow.document.write(html);
+    printWindow.document.close();
 }
 
 function exportTuitionExcel() {
@@ -1179,5 +1180,4 @@ window.syncSePay = syncSePay;
 window.remindZalo = remindZalo;
 window.copyClassNotice = copyClassNotice;
 window.showClassQRList = showClassQRList;
-window.taiAnhQRCaLop = taiAnhQRCaLop;
 window.exportTuitionExcel = exportTuitionExcel;
