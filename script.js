@@ -398,7 +398,7 @@ function submitAttendance() {
     } catch(err) { showToast("Lỗi: " + err.message, "error"); }
 }
 
-// ================= TÀI CHÍNH TỰ ĐỘNG & SEPAY =================
+// ================= TÀI CHÍNH TỰ ĐỘNG =================
 function saveBankSettings() {
     db.settings = db.settings || {};
     db.settings.bankId = document.getElementById('set-bank-id').value.trim() || 'MB';
@@ -406,6 +406,7 @@ function saveBankSettings() {
     saveData(); closeModal('modal-settings'); showToast("Đã lưu cấu hình Ngân hàng!");
 }
 
+// BẢN VÁ: Hàm lấy dữ liệu giữ nguyên Kỳ thu hiện tại của lớp
 function getTuitionData(classId) {
     let result = [];
     let studentsInClass = db.students.filter(s => s.classId == classId);
@@ -414,17 +415,19 @@ function getTuitionData(classId) {
 
     let cycle = parseInt(cls.cycle) || 10;
 
+    // Đếm số buổi đã dạy để xác định "Kỳ thu hiện tại" của LỚP
+    let classSessions = db.sessions.filter(s => s.classId == cls.id && s.status === 'completed').sort((a,b)=> (a.date||"").localeCompare(b.date||""));
+    let totalCompleted = classSessions.length;
+    let currentCycleNum = Math.floor(totalCompleted / cycle) + 1;
+
     studentsInClass.forEach(stu => {
         let fee = parseInt(stu.customFee) || parseInt(cls.fee) || 0;
-        let paidCycles = db.tuitions.filter(t => t.studentId == stu.id).length;
-        let currentCycleNum = paidCycles + 1; 
 
         // Khấu trừ phép của đợt ngay trước đó
         let discountCount = 0;
-        if (paidCycles > 0) {
-            let classSessions = db.sessions.filter(s => s.classId == cls.id && s.status === 'completed').sort((a,b)=> (a.date||"").localeCompare(b.date||""));
-            let prevStart = (paidCycles - 1) * cycle;
-            let prevEnd = paidCycles * cycle;
+        if (currentCycleNum > 1) {
+            let prevStart = (currentCycleNum - 2) * cycle;
+            let prevEnd = (currentCycleNum - 1) * cycle;
             let prevSessIds = classSessions.slice(prevStart, prevEnd).map(s => String(s.id));
             discountCount = db.attendance.filter(a => a.studentId == stu.id && a.status === 'phép' && prevSessIds.includes(String(a.sessionId))).length;
         }
@@ -438,6 +441,7 @@ function getTuitionData(classId) {
         let bankAcc = (db.settings && db.settings.bankAcc) ? db.settings.bankAcc : '123456789';
         let qrLink = `https://img.vietqr.io/image/${bankId}-${bankAcc}-compact2.png?amount=${finalAmount}&addInfo=${encodeURIComponent(ckContent)}`;
 
+        // Kiểm tra xem học sinh ĐÃ NỘP cho KỲ HIỆN TẠI chưa
         let isPaid = db.tuitions.find(t => t.studentId == stu.id && t.cycleNumber === currentCycleNum) ? true : false;
 
         result.push({
@@ -587,7 +591,7 @@ function copyClassNotice() {
     });
 }
 
-// CẬP NHẬT: Giao diện lưới QR có ảnh Watermark và Tiêu đề
+// ================= GIAO DIỆN QR VÀ XUẤT ẢNH =================
 function showClassQRList() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp!", "error");
@@ -596,7 +600,6 @@ function showClassQRList() {
     let data = getTuitionData(cid).filter(d => !d.isPaid);
     let grid = document.getElementById('qr-grid-container'); if(!grid) return;
     
-    // Đặt tên tiêu đề cho bức ảnh
     document.getElementById('qr-export-title').innerText = `BẢNG MÃ QR HỌC PHÍ - ${cls.name.toUpperCase()}`;
     grid.innerHTML = '';
     
@@ -604,7 +607,6 @@ function showClassQRList() {
         grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px; color:#64748b; font-weight:600;">Tất cả học sinh trong nhóm đã nộp học phí! 🎉</div>';
     } else {
         data.forEach(d => {
-            // LƯU Ý: crossorigin="anonymous" đã được thêm vào
             grid.innerHTML += `
                 <div style="background: white; border-radius: 12px; padding: 15px; text-align: center; border: 2px solid #f1f5f9; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <b style="font-size: 1rem; color: #0f172a; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 5px;">${d.stu.name}</b>
@@ -616,31 +618,26 @@ function showClassQRList() {
     openModal('modal-qr-list');
 }
 
-// TÍNH NĂNG MỚI: Chụp và tải ảnh QR cả lớp
 function taiAnhQRCaLop() {
     const exportArea = document.getElementById('qr-export-area');
     const clsName = document.getElementById('qr-export-title').innerText.replace('BẢNG MÃ QR HỌC PHÍ - ', '');
     
     showLoading(true, "AI đang xử lý ghép ảnh, vui lòng đợi...");
     
-    // Thả nổi chiều cao để chụp được toàn bộ ảnh dài dù bị khuất cuộn chuột
     const originalMaxHeight = exportArea.style.maxHeight;
     const originalOverflow = exportArea.style.overflow;
     exportArea.style.maxHeight = 'none';
     exportArea.style.overflow = 'visible';
 
-    // Đợi 0.5s để các ảnh load xong rồi chụp
     setTimeout(() => {
         html2canvas(exportArea, {
-            useCORS: true,       // Bắt buộc để đọc được link ảnh từ vietqr
-            scale: 2,            // Giúp ảnh nét gấp đôi
+            useCORS: true,       
+            scale: 2,            
             backgroundColor: "#ffffff"
         }).then(canvas => {
-            // Trả lại giao diện cuộn chuột như cũ
             exportArea.style.maxHeight = originalMaxHeight;
             exportArea.style.overflow = originalOverflow;
 
-            // Tự động tải xuống
             const link = document.createElement('a');
             let thangHienTai = new Date().getMonth() + 1;
             link.download = `ToanMatsuda_QR_HocPhi_${clsName}_T${thangHienTai}.png`;
@@ -656,7 +653,7 @@ function taiAnhQRCaLop() {
     }, 500);
 }
 
-// TÍNH NĂNG MỚI: XUẤT FILE EXCEL CHUẨN (.XLSX) DÙNG THƯ VIỆN SHEETJS
+// BẢN VÁ: TÍNH NĂNG MỚI - XUẤT FILE EXCEL CHUẨN (.XLSX) DÙNG THƯ VIỆN SHEETJS
 function exportTuitionExcel() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp để xuất file!", "error");
@@ -668,7 +665,6 @@ function exportTuitionExcel() {
         return showToast("Không có dữ liệu học sinh trong lớp này!", "error");
     }
 
-    // Tạo mảng dữ liệu chuẩn bị cho Excel
     let excelData = [];
     
     // Tạo dòng tiêu đề
@@ -690,10 +686,7 @@ function exportTuitionExcel() {
         ]);
     });
 
-    // Tạo một Workbook (file Excel) mới
     let wb = XLSX.utils.book_new();
-    
-    // Chuyển mảng dữ liệu thành một Worksheet (trang tính)
     let ws = XLSX.utils.aoa_to_sheet(excelData);
     
     // Làm đẹp file Excel: Tự động căn chỉnh độ rộng các cột cho vừa vặn chữ
@@ -711,10 +704,8 @@ function exportTuitionExcel() {
     ];
     ws['!cols'] = wscols;
 
-    // Gắn trang tính vào file Excel
     XLSX.utils.book_append_sheet(wb, ws, "Danh Sach Thu Tien");
 
-    // Xuất file và tự động tải xuống
     let thangHienTai = new Date().getMonth() + 1;
     let fileName = `DanhSachThuTien_${cls.name.replace(/ /g, '_')}_Thang${thangHienTai}.xlsx`;
     
