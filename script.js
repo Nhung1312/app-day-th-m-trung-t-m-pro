@@ -294,7 +294,6 @@ function updateDashboard() {
     db.attendance = db.attendance.filter(a => db.sessions.some(s => String(s.id) === String(a.sessionId)));
     
     document.getElementById('dash-total-classes').innerText = db.classes.length; 
-    // CẬP NHẬT: Không đếm học sinh đã nghỉ ngang vào Tổng số
     document.getElementById('dash-total-students').innerText = db.students.filter(s => s.status !== 'inactive').length;
     let todayStr = getTodayStr(); document.getElementById('dash-today-date').innerText = parseDateVi(todayStr);
     
@@ -333,7 +332,6 @@ function updateDashboard() {
 
     activeTodays.forEach(s => {
         let cls = db.classes.find(c => c.id == s.classId); if(!cls) return;
-        // CẬP NHẬT: Không đếm học sinh đã nghỉ ngang
         let stuCount = db.students.filter(st => st.classId == cls.id && st.status !== 'inactive').length;
         let classSessions = db.sessions.filter(x => x.classId == cls.id && x.status !== 'canceled').sort((a,b) => { let d1 = new Date(a.date).getTime(), d2 = new Date(b.date).getTime(); if(d1 !== d2) return d1 - d2; return String(a.start||"").localeCompare(String(b.start||"")); });
         let sessionIndex = classSessions.findIndex(x => String(x.id) === String(s.id)) + 1;
@@ -350,7 +348,6 @@ function openAttendance(sessionId, className) {
     if(!session) return showToast("Không tìm thấy dữ liệu buổi học!", "error");
     document.getElementById('att-class-name').innerText = className; document.getElementById('att-date-info').innerText = `${parseDateVi(session.date)} (${session.start||'--:--'} - ${session.end||'--:--'})`;
     
-    // CẬP NHẬT: Không hiển thị học sinh đã nghỉ ngang vào danh sách điểm danh
     let stus = db.students.filter(s => s.classId == session.classId && s.status !== 'inactive'); 
     let html = '';
     
@@ -387,7 +384,6 @@ function submitAttendance() {
     } catch(err) { showToast("Lỗi: " + err.message, "error"); }
 }
 
-// ================= TÀI CHÍNH THÔNG MINH =================
 function saveBankSettings() {
     db.settings = db.settings || {};
     db.settings.bankId = document.getElementById('set-bank-id').value.trim() || 'MB';
@@ -397,7 +393,6 @@ function saveBankSettings() {
 
 function getTuitionData(classId) {
     let result = [];
-    // CẬP NHẬT: Không tính tiền cho học sinh đã nghỉ ngang
     let studentsInClass = db.students.filter(s => s.classId == classId && s.status !== 'inactive');
     let cls = db.classes.find(c => c.id == classId);
     if (!cls) return result;
@@ -594,7 +589,6 @@ function copyClassNotice() {
     });
 }
 
-// ================= GIAO DIỆN QR VÀ XUẤT ẢNH =================
 async function getBase64QR(url) {
     try {
         const res = await fetch(url);
@@ -735,8 +729,17 @@ function exportTuitionExcel() {
     showToast("✅ Đã xuất file Excel chuẩn (.xlsx) thành công!");
 }
 
-// ================= QUẢN LÝ LỚP HỌC VÀ TÍNH NĂNG NGHỈ NGANG =================
-function openAddStudentForClass(cid) { document.getElementById('stu-id').value = ''; document.getElementById('stu-name').value = ''; document.getElementById('stu-phone').value = ''; document.getElementById('stu-custom-fee').value = ''; document.getElementById('stu-start').value = getTodayStr(); document.getElementById('stu-class').value = cid; openModal('modal-add-student'); }
+// BẢN VÁ: CẬP NHẬT GẮN NGÀY BẮT ĐẦU CỦA LỚP CHO HỌC SINH MỚI
+function openAddStudentForClass(cid) { 
+    let cls = db.classes.find(c => c.id == cid);
+    document.getElementById('stu-id').value = ''; 
+    document.getElementById('stu-name').value = ''; 
+    document.getElementById('stu-phone').value = ''; 
+    document.getElementById('stu-custom-fee').value = ''; 
+    document.getElementById('stu-start').value = cls ? cls.startDate : getTodayStr(); 
+    document.getElementById('stu-class').value = cid; 
+    openModal('modal-add-student'); 
+}
 
 function renderClasses() {
     const list = document.getElementById('class-list'); list.innerHTML = '';
@@ -747,7 +750,6 @@ function renderClasses() {
     if(filteredClasses.length === 0) { list.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Không tìm thấy nhóm lớp nào!</div>'; }
     
     filteredClasses.forEach(c => {
-        // CẬP NHẬT: Không đếm học sinh đã nghỉ ngang
         let stuCount = db.students.filter(s => s.classId == c.id && s.status !== 'inactive').length; 
         let tkbText = c.tkb.map(t => `T${t.dayOfWeek}(${t.start})`).join(', ');
         let classSessions = db.sessions.filter(x => x.classId == c.id && x.status !== 'canceled').sort((a,b) => { let d1 = new Date(a.date).getTime(), d2 = new Date(b.date).getTime(); if(d1 !== d2) return d1 - d2; return String(a.start||"").localeCompare(String(b.start||"")); });
@@ -776,7 +778,6 @@ function populateClassSelects() {
     const formTuit = document.getElementById('tuition-class-select'); if(formTuit && formTuit.options.length === 0) formTuit.innerHTML = htmlForm;
 }
 
-// BẢN VÁ: CẬP NHẬT TÍNH NĂNG NGHỈ NGANG (BẢO LƯU)
 function renderStudents() { 
     const list = document.getElementById('student-list'); 
     list.innerHTML = ''; 
@@ -827,26 +828,30 @@ function toggleStudentStatus(id) {
     }
 }
 
+// BẢN VÁ: CẬP NHẬT GẮN NGÀY BẮT ĐẦU CỦA LỚP KHI LƯU HỌC SINH MỚI
 function saveStudent() { 
     let id = document.getElementById('stu-id').value;
     let cid = document.getElementById('stu-class').value; 
     let name = document.getElementById('stu-name').value; 
     if(!cid || !name) return showToast("Nhập đủ tên và chọn lớp!", "error"); 
     
+    let cls = db.classes.find(c => c.id == cid);
+    let defaultStart = cls ? cls.startDate : getTodayStr();
+
     let obj = { 
         id: id ? parseInt(id) : Date.now(), 
         classId: parseInt(cid), 
         name: name, 
         phone: document.getElementById('stu-phone').value, 
         customFee: document.getElementById('stu-custom-fee').value, 
-        startDate: document.getElementById('stu-start').value || getTodayStr(),
+        startDate: document.getElementById('stu-start').value || defaultStart,
         status: 'active'
     };
 
     if(id) {
         let idx = db.students.findIndex(s => s.id == id);
         if(idx > -1) {
-            obj.status = db.students[idx].status || 'active'; // Giữ nguyên trạng thái cũ khi sửa
+            obj.status = db.students[idx].status || 'active'; 
             db.students[idx] = obj;
         }
     } else {
@@ -862,18 +867,18 @@ function saveStudent() {
 function editStudent(id) {
     let s = db.students.find(x => x.id == id);
     if(!s) return;
+    let cls = db.classes.find(c => c.id == s.classId);
     document.getElementById('stu-id').value = s.id;
     document.getElementById('stu-class').value = s.classId;
     document.getElementById('stu-name').value = s.name;
     document.getElementById('stu-phone').value = s.phone || '';
     document.getElementById('stu-custom-fee').value = s.customFee || '';
-    document.getElementById('stu-start').value = s.startDate || getTodayStr();
+    document.getElementById('stu-start').value = s.startDate || (cls ? cls.startDate : getTodayStr());
     openModal('modal-add-student');
 }
 
 function deleteStudent(id) { if(confirm("Cảnh báo: Nếu xóa, dữ liệu biên lai cũ cũng sẽ bị mất. Khuyến khích dùng nút 'Báo nghỉ ngang' (Biểu tượng Hình người gạch chéo) thay vì xóa. Bạn vẫn muốn xóa vĩnh viễn?")) { db.students = db.students.filter(s => s.id != id); saveData(); renderStudents(); } }
 
-// ================= LỊCH NGHỈ =================
 function renderHolidays() {
     const list = document.getElementById('holiday-list'); list.innerHTML = '';
     db.holidays.forEach(h => {
@@ -890,7 +895,6 @@ function saveHoliday() {
 }
 function deleteHoliday(id) { if(confirm("Xóa lịch nghỉ?")) { db.holidays = db.holidays.filter(h => h.id != id); saveData(); generateSchedules(); renderHolidays(); } }
 
-// ================= SAO LƯU & KHÔI PHỤC =================
 function backupData() {
     let dataStr = JSON.stringify(db); let blob = new Blob([dataStr], {type: "application/json"}); let url = URL.createObjectURL(blob); let a = document.createElement('a'); a.href = url; let date = new Date().toISOString().split('T')[0]; a.download = `DuLieuDayThem_${date}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); showToast("Đã tải bản sao lưu (File .json) xuống máy!");
 }
@@ -907,7 +911,7 @@ function restoreData(event) {
     reader.readAsText(file); event.target.value = ''; 
 }
 
-// ================= IMPORT =================
+// BẢN VÁ: CẬP NHẬT GẮN NGÀY BẮT ĐẦU CỦA LỚP CHO HỌC SINH IMPORT HÀNG LOẠT
 let parsedData = [];
 function openImportModal() { if(db.classes.length === 0) { showToast("Bạn cần TẠO NHÓM LỚP trước khi Import!", "error"); switchView('view-classes', document.querySelectorAll('.nav-item')[1]); return; } document.getElementById('import-step-1').classList.remove('hidden'); document.getElementById('import-step-2').classList.add('hidden'); document.getElementById('import-footer').classList.add('hidden'); openModal('modal-import'); }
 async function handleImportFile(event) { const file = event.target.files[0]; if(!file) return; const ext = file.name.split('.').pop().toLowerCase(); showLoading(true, "Đang trích xuất dữ liệu..."); parsedData = []; try { if(ext === 'xlsx' || ext === 'xls' || ext === 'csv') { await extractExcel(file); } else if (ext === 'docx') { await extractWord(file); } else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') { await extractImageOCR(file); } else { throw new Error("Định dạng không hỗ trợ!"); } } catch (e) { showToast(e.message || "Lỗi xử lý file!", "error"); } showLoading(false); event.target.value = ''; }
@@ -967,9 +971,33 @@ function parseTableToStudents(rows) {
     });
 }
 
-function confirmImport() { let cid = document.getElementById('import-class-select').value; let count = 0; parsedData.forEach((s, i) => { let finalName = document.getElementById(`imp-name-${i}`).value.trim(); if(finalName) { db.students.push({ id: Date.now() + i, classId: parseInt(cid), name: finalName, phone: document.getElementById(`imp-phone-${i}`).value, customFee: document.getElementById(`imp-fee-${i}`).value, startDate: getTodayStr(), status: 'active' }); count++; } }); saveData(); closeModal('modal-import'); renderStudents(); showToast(`🎉 Đã nhập ${count} học sinh!`); }
+function confirmImport() { 
+    let cid = document.getElementById('import-class-select').value; 
+    let count = 0; 
+    let cls = db.classes.find(c => c.id == cid);
+    let defaultStart = cls ? cls.startDate : getTodayStr(); // Lấy ngày của lớp
 
-// ================= THỐNG KÊ & BÁO CÁO =================
+    parsedData.forEach((s, i) => { 
+        let finalName = document.getElementById(`imp-name-${i}`).value.trim(); 
+        if(finalName) { 
+            db.students.push({ 
+                id: Date.now() + i, 
+                classId: parseInt(cid), 
+                name: finalName, 
+                phone: document.getElementById(`imp-phone-${i}`).value, 
+                customFee: document.getElementById(`imp-fee-${i}`).value, 
+                startDate: defaultStart, // Gán cho học sinh
+                status: 'active' 
+            }); 
+            count++; 
+        } 
+    }); 
+    saveData(); 
+    closeModal('modal-import'); 
+    renderStudents(); 
+    showToast(`🎉 Đã nhập ${count} học sinh!`); 
+}
+
 function renderStatistics() {
     let totalExpected = 0;
     let totalCollected = 0;
@@ -979,7 +1007,6 @@ function renderStatistics() {
     let classStats = {};
     db.classes.forEach(c => {
         classStats[c.id] = { name: c.name, expected: 0, collected: 0, stuCount: 0 };
-        // LƯU Ý: Vẫn giữ lại học sinh đã nghỉ để tính đúng doanh thu kỳ vọng cũ của TT
         let stus = db.students.filter(s => s.classId == c.id);
         classStats[c.id].stuCount = stus.length;
         
@@ -1045,7 +1072,7 @@ window.renderStudents = renderStudents;
 window.deleteStudent = deleteStudent;
 window.saveStudent = saveStudent;
 window.editStudent = editStudent;
-window.toggleStudentStatus = toggleStudentStatus; // Nút bảo lưu
+window.toggleStudentStatus = toggleStudentStatus;
 window.editClass = editClass;
 window.deleteClass = deleteClass;
 window.saveClass = saveClass;
