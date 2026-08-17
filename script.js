@@ -591,23 +591,109 @@ function showClassQRList() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp!", "error");
     
+    let cls = db.classes.find(c => c.id == cid);
     let data = getTuitionData(cid).filter(d => !d.isPaid);
     let grid = document.getElementById('qr-grid-container'); if(!grid) return;
+    
+    // Đặt tên tiêu đề cho bức ảnh
+    document.getElementById('qr-export-title').innerText = `BẢNG MÃ QR HỌC PHÍ - ${cls.name.toUpperCase()}`;
     grid.innerHTML = '';
     
     if(data.length === 0) {
-        grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px; color:#64748b;">Tất cả học sinh trong nhóm đã nộp học phí!</div>';
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px; color:#64748b; font-weight:600;">Tất cả học sinh trong nhóm đã nộp học phí! 🎉</div>';
     } else {
         data.forEach(d => {
             grid.innerHTML += `
-                <div style="background:white; border-radius:12px; padding:10px; text-align:center; border:1px solid #e2e8f0; box-shadow:0 1px 3px rgba(0,0,0,0.05);">
-                    <b style="font-size:0.9rem; color:#1e3a8a; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${d.stu.name}</b>
-                    <p style="font-size:0.85rem; color:#ef4444; font-weight:bold; margin:4px 0;">${d.finalAmount.toLocaleString()}đ</p>
-                    <img src="${d.qrLink}" style="width:100%; border-radius:8px; border:1px solid #f1f5f9;">
+                <div style="background: white; border-radius: 12px; padding: 15px; text-align: center; border: 2px solid #f1f5f9; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
+                    <b style="font-size: 1rem; color: #0f172a; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 5px;">${d.stu.name}</b>
+                    <p style="font-size: 1.15rem; color: #ef4444; font-weight: 900; margin-bottom: 12px;">${d.finalAmount.toLocaleString()}đ</p>
+                    <img src="${d.qrLink}" crossorigin="anonymous" style="width: 100%; max-width: 180px; border-radius: 8px; border: 1px solid #e2e8f0; padding: 4px; background: white;">
                 </div>`;
         });
     }
     openModal('modal-qr-list');
+}
+
+function taiAnhQRCaLop() {
+    const exportArea = document.getElementById('qr-export-area');
+    const clsName = document.getElementById('qr-export-title').innerText.replace('BẢNG MÃ QR HỌC PHÍ - ', '');
+    
+    showLoading(true, "AI đang xử lý ghép ảnh, vui lòng đợi...");
+    
+    const originalMaxHeight = exportArea.style.maxHeight;
+    const originalOverflow = exportArea.style.overflow;
+    exportArea.style.maxHeight = 'none';
+    exportArea.style.overflow = 'visible';
+
+    setTimeout(() => {
+        html2canvas(exportArea, {
+            useCORS: true,       
+            scale: 2,            
+            backgroundColor: "#ffffff"
+        }).then(canvas => {
+            exportArea.style.maxHeight = originalMaxHeight;
+            exportArea.style.overflow = originalOverflow;
+
+            const link = document.createElement('a');
+            let thangHienTai = new Date().getMonth() + 1;
+            link.download = `ToanMatsuda_QR_HocPhi_${clsName}_T${thangHienTai}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            
+            showLoading(false);
+            showToast("✅ Đã tải ảnh thành công! Hãy gửi vào nhóm Zalo.");
+        }).catch(err => {
+            showLoading(false);
+            showToast("❌ Lỗi khi xuất ảnh: " + err.message, "error");
+        });
+    }, 500);
+}
+
+// TÍNH NĂNG MỚI: XUẤT FILE EXCEL (CSV) THU TIỀN THEO LỚP
+function exportTuitionExcel() {
+    let cid = document.getElementById('tuition-class-select').value;
+    if(!cid) return showToast("Chưa chọn nhóm lớp để xuất file!", "error");
+
+    let cls = db.classes.find(c => c.id == cid);
+    let data = getTuitionData(cid);
+
+    if(data.length === 0) {
+        return showToast("Không có dữ liệu học sinh trong lớp này!", "error");
+    }
+
+    // Tạo nội dung CSV (Sử dụng \ufeff để Excel nhận diện được Tiếng Việt có dấu)
+    let csvContent = "\ufeff";
+    csvContent += "STT,Họ và tên,Số điện thoại,Kỳ thu,Số buổi,Học phí dự kiến,Số buổi phép,Tiền trừ phép,Tổng cần thu,Trạng thái\n";
+
+    data.forEach((d, index) => {
+        let stt = index + 1;
+        let ten = `"${d.stu.name}"`;
+        let sdt = `"${d.stu.phone || ''}"`;
+        let ky = d.cycleNum;
+        let soBuoi = d.cycleSessions;
+        let hpDuKien = d.upfrontFee;
+        let phep = d.discountCount;
+        let tienTru = d.discountFee;
+        let tongThu = d.finalAmount;
+        let trangThai = d.isPaid ? "Đã nộp" : "Chưa nộp";
+
+        csvContent += `${stt},${ten},${sdt},${ky},${soBuoi},${hpDuKien},${phep},${tienTru},${tongThu},${trangThai}\n`;
+    });
+
+    // Tạo link tải file tự động
+    let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    let url = URL.createObjectURL(blob);
+    let link = document.createElement("a");
+    link.setAttribute("href", url);
+    
+    let thangHienTai = new Date().getMonth() + 1;
+    link.setAttribute("download", `DanhSachThuTien_${cls.name}_Thang${thangHienTai}.csv`);
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    showToast("✅ Đã xuất file thành công!");
 }
 
 // ================= QUẢN LÝ LỚP HỌC =================
@@ -925,3 +1011,5 @@ window.toggleTuition = toggleTuition;
 window.remindZalo = remindZalo;
 window.copyClassNotice = copyClassNotice;
 window.showClassQRList = showClassQRList;
+window.taiAnhQRCaLop = taiAnhQRCaLop;
+window.exportTuitionExcel = exportTuitionExcel;
