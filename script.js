@@ -91,7 +91,8 @@ onAuthStateChanged(auth, async (user) => {
                 if (docSnap.exists()) {
                     if (!docSnap.metadata.hasPendingWrites) {
                         db = Object.assign({}, defaultData, docSnap.data());
-                        db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789' };
+                        db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789', sepayLink: '' };
+                        db.processedTx = db.processedTx || []; // Cập nhật chứa Lịch sử giao dịch SePay
                         localStorage.setItem('tutoringData', JSON.stringify(db));
                         if (typeof updateDashboard === 'function') updateDashboard();
                         if (typeof renderClasses === 'function') renderClasses();
@@ -101,6 +102,11 @@ onAuthStateChanged(auth, async (user) => {
                         if (document.getElementById('view-statistics')?.classList.contains('active')) {
                             if (typeof renderStatistics === 'function') renderStatistics();
                         }
+                        
+                        // Cập nhật giao diện Cài đặt
+                        document.getElementById('set-bank-id').value = db.settings.bankId || 'MB';
+                        document.getElementById('set-bank-acc').value = db.settings.bankAcc || '123456789';
+                        document.getElementById('set-sepay-link').value = db.settings.sepayLink || '';
                     }
                 } else {
                     setDoc(docRef, db);
@@ -126,15 +132,16 @@ window.logoutApp = function() {
 };
 
 const defaultData = { 
-    classes: [], students: [], holidays: [], sessions: [], attendance: [], tuitions: [],
-    settings: { bankId: 'MB', bankAcc: '123456789' }
+    classes: [], students: [], holidays: [], sessions: [], attendance: [], tuitions: [], processedTx: [],
+    settings: { bankId: 'MB', bankAcc: '123456789', sepayLink: '' }
 };
 
 let stored = JSON.parse(localStorage.getItem('tutoringData'));
 let db = stored ? Object.assign({}, defaultData, stored) : defaultData;
 db.classes = db.classes || []; db.students = db.students || []; db.holidays = db.holidays || [];
 db.sessions = db.sessions || []; db.attendance = db.attendance || []; db.tuitions = db.tuitions || [];
-db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789' };
+db.processedTx = db.processedTx || [];
+db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789', sepayLink: '' };
 
 async function saveData() {
     localStorage.setItem('tutoringData', JSON.stringify(db));
@@ -160,6 +167,11 @@ function parseDateVi(dStr) {
 
 window.onload = () => { 
     generateSchedules(); updateDashboard(); renderClasses(); populateClassSelects(); 
+    
+    document.getElementById('set-bank-id').value = db.settings.bankId || 'MB';
+    document.getElementById('set-bank-acc').value = db.settings.bankAcc || '123456789';
+    document.getElementById('set-sepay-link').value = db.settings.sepayLink || '';
+
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration failed:', err));
     }
@@ -388,7 +400,8 @@ function saveBankSettings() {
     db.settings = db.settings || {};
     db.settings.bankId = document.getElementById('set-bank-id').value.trim() || 'MB';
     db.settings.bankAcc = document.getElementById('set-bank-acc').value.trim() || '123456789';
-    saveData(); closeModal('modal-settings'); showToast("Đã lưu cấu hình Ngân hàng!");
+    db.settings.sepayLink = document.getElementById('set-sepay-link').value.trim() || '';
+    saveData(); closeModal('modal-settings'); showToast("Đã lưu cấu hình Cài đặt!");
 }
 
 function getTuitionData(classId) {
@@ -543,6 +556,74 @@ function toggleTuition(stuId, classId, cycleNum, amount) {
 function deleteTuition(id) {
     if(confirm("Hủy bỏ giao dịch thu tiền này?")) {
         db.tuitions = db.tuitions.filter(t => t.id != id); saveData(); renderTuition(); showToast("Đã hủy giao dịch!");
+    }
+}
+
+// BẢN VÁ: TÍNH NĂNG ĐỒNG BỘ SEPAY TỰ ĐỘNG
+async function syncSePay() {
+    let link = db.settings && db.settings.sepayLink;
+    if(!link || !link.includes('pub?output=csv')) {
+        return showToast("Vui lòng dán Link CSV của Google Sheets vào mục Cài đặt trước!", "error");
+    }
+
+    showLoading(true, "Đang kết nối ngân hàng SePay...");
+    try {
+        let res = await fetch(link);
+        if(!res.ok) throw new Error("Không thể tải file CSV. Vui lòng kiểm tra lại link.");
+        let text = await res.text();
+
+        let rows = text.split('\n');
+        let newPayments = 0;
+        db.processedTx = db.processedTx || [];
+
+        for(let i=1; i<rows.length; i++) { 
+            let rowText = rows[i].toUpperCase();
+
+            // Tìm cú pháp HP [ID]
+            let match = rowText.match(/HP\s*(\d+)/);
+            if(match) {
+                let stuId = parseInt(match[1]);
+
+                // Tạo chuỗi băm để làm ID chống trùng lặp (giữ 60 ký tự đầu của dòng giao dịch)
+                let txHash = encodeURIComponent(rowText.substring(0, 60)).replace(/[^a-zA-Z0-9]/g, '');
+
+                if(!db.processedTx.includes(txHash)) {
+                    let stu = db.students.find(s => s.id == stuId);
+                    if(stu) {
+                        let cData = getTuitionData(stu.classId);
+                        let d = cData.find(x => x.stu.id == stuId);
+
+                        // Chỉ gạch nợ nếu học sinh chưa nộp kỳ hiện tại
+                        if(d && !d.isPaid) {
+                            db.tuitions.push({
+                                id: Date.now() + Math.floor(Math.random()*1000),
+                                studentId: stu.id,
+                                classId: stu.classId,
+                                cycleNumber: d.cycleNum,
+                                amount: d.finalAmount, 
+                                date: getTodayStr()
+                            });
+                            db.processedTx.push(txHash);
+                            newPayments++;
+                        }
+                    }
+                }
+            }
+        }
+
+        saveData();
+        renderTuition();
+        showLoading(false);
+
+        if(newPayments > 0) {
+            showToast(`🎉 Thành công! Đã tự động gạch nợ cho ${newPayments} học sinh.`);
+        } else {
+            showToast("Không có giao dịch thanh toán mới nào.");
+        }
+
+    } catch(e) {
+        showLoading(false);
+        showToast("Lỗi đồng bộ: " + e.message, "error");
     }
 }
 
@@ -729,7 +810,6 @@ function exportTuitionExcel() {
     showToast("✅ Đã xuất file Excel chuẩn (.xlsx) thành công!");
 }
 
-// BẢN VÁ: CẬP NHẬT GẮN NGÀY BẮT ĐẦU CỦA LỚP CHO HỌC SINH MỚI
 function openAddStudentForClass(cid) { 
     let cls = db.classes.find(c => c.id == cid);
     document.getElementById('stu-id').value = ''; 
@@ -828,7 +908,6 @@ function toggleStudentStatus(id) {
     }
 }
 
-// BẢN VÁ: CẬP NHẬT GẮN NGÀY BẮT ĐẦU CỦA LỚP KHI LƯU HỌC SINH MỚI
 function saveStudent() { 
     let id = document.getElementById('stu-id').value;
     let cid = document.getElementById('stu-class').value; 
@@ -911,7 +990,6 @@ function restoreData(event) {
     reader.readAsText(file); event.target.value = ''; 
 }
 
-// BẢN VÁ: CẬP NHẬT GẮN NGÀY BẮT ĐẦU CỦA LỚP CHO HỌC SINH IMPORT HÀNG LOẠT
 let parsedData = [];
 function openImportModal() { if(db.classes.length === 0) { showToast("Bạn cần TẠO NHÓM LỚP trước khi Import!", "error"); switchView('view-classes', document.querySelectorAll('.nav-item')[1]); return; } document.getElementById('import-step-1').classList.remove('hidden'); document.getElementById('import-step-2').classList.add('hidden'); document.getElementById('import-footer').classList.add('hidden'); openModal('modal-import'); }
 async function handleImportFile(event) { const file = event.target.files[0]; if(!file) return; const ext = file.name.split('.').pop().toLowerCase(); showLoading(true, "Đang trích xuất dữ liệu..."); parsedData = []; try { if(ext === 'xlsx' || ext === 'xls' || ext === 'csv') { await extractExcel(file); } else if (ext === 'docx') { await extractWord(file); } else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') { await extractImageOCR(file); } else { throw new Error("Định dạng không hỗ trợ!"); } } catch (e) { showToast(e.message || "Lỗi xử lý file!", "error"); } showLoading(false); event.target.value = ''; }
@@ -975,7 +1053,7 @@ function confirmImport() {
     let cid = document.getElementById('import-class-select').value; 
     let count = 0; 
     let cls = db.classes.find(c => c.id == cid);
-    let defaultStart = cls ? cls.startDate : getTodayStr(); // Lấy ngày của lớp
+    let defaultStart = cls ? cls.startDate : getTodayStr();
 
     parsedData.forEach((s, i) => { 
         let finalName = document.getElementById(`imp-name-${i}`).value.trim(); 
@@ -986,7 +1064,7 @@ function confirmImport() {
                 name: finalName, 
                 phone: document.getElementById(`imp-phone-${i}`).value, 
                 customFee: document.getElementById(`imp-fee-${i}`).value, 
-                startDate: defaultStart, // Gán cho học sinh
+                startDate: defaultStart,
                 status: 'active' 
             }); 
             count++; 
@@ -1060,7 +1138,6 @@ function renderStatistics() {
     }
 }
 
-// ================= GẮN HÀM VÀO WINDOW =================
 window.switchView = switchView;
 window.switchCalTab = switchCalTab;
 window.openModal = openModal;
@@ -1098,6 +1175,7 @@ window.renderStatistics = renderStatistics;
 window.saveBankSettings = saveBankSettings;
 window.renderTuition = renderTuition;
 window.toggleTuition = toggleTuition;
+window.syncSePay = syncSePay;
 window.remindZalo = remindZalo;
 window.copyClassNotice = copyClassNotice;
 window.showClassQRList = showClassQRList;
