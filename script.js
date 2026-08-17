@@ -57,7 +57,6 @@ onAuthStateChanged(auth, async (user) => {
                 const duLieu = docUserSnap.data();
                 const ngayHetHan = new Date(duLieu.ngay_het_han);
 
-                // TÍNH SỐ NGÀY CÒN LẠI
                 const timeDiff = ngayHetHan.getTime() - ngayHienTai.getTime();
                 const daysLeft = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
@@ -71,9 +70,6 @@ onAuthStateChanged(auth, async (user) => {
                     }
                 } else {
                     document.getElementById('man-hinh-thu-phi').style.display = 'none';
-                    console.log("Tài khoản còn hạn đến: ", ngayHetHan.toLocaleDateString());
-
-                    // CẢNH BÁO KHI CÒN <= 5 NGÀY
                     if (daysLeft <= 5) {
                         const banner = document.getElementById('trial-warning-banner');
                         if (banner) {
@@ -90,7 +86,6 @@ onAuthStateChanged(auth, async (user) => {
         }
 
         if (hasAccess) {
-            // NÂNG CẤP LÊN ONSNAPSHOT ĐỂ NGHE SEPAY THEO THỜI GIAN THỰC
             const docRef = doc(firestoreDb, "DuLieuDayThem", user.uid);
             onSnapshot(docRef, (docSnap) => {
                 if (docSnap.exists()) {
@@ -106,7 +101,6 @@ onAuthStateChanged(auth, async (user) => {
                         if (document.getElementById('view-statistics')?.classList.contains('active')) {
                             if (typeof renderStatistics === 'function') renderStatistics();
                         }
-                        console.log("☁️ Dữ liệu đã được đồng bộ từ mây!");
                     }
                 } else {
                     setDoc(docRef, db);
@@ -122,7 +116,6 @@ onAuthStateChanged(auth, async (user) => {
     }
 });
 
-// TÍNH NĂNG ĐĂNG XUẤT 
 window.logoutApp = function() {
     if(confirm("Bạn có chắc chắn muốn đăng xuất khỏi thiết bị này?")) {
         signOut(auth).then(() => {
@@ -132,14 +125,8 @@ window.logoutApp = function() {
     }
 };
 
-// ================= DATA STRUCTURE =================
 const defaultData = { 
-    classes: [], 
-    students: [], 
-    holidays: [], 
-    sessions: [], 
-    attendance: [], 
-    tuitions: [],
+    classes: [], students: [], holidays: [], sessions: [], attendance: [], tuitions: [],
     settings: { bankId: 'MB', bankAcc: '123456789' }
 };
 
@@ -152,12 +139,10 @@ db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789' };
 async function saveData() {
     localStorage.setItem('tutoringData', JSON.stringify(db));
     updateDashboard(); 
-
     if (currentUser) {
         try {
             const docRef = doc(firestoreDb, "DuLieuDayThem", currentUser.uid);
             await setDoc(docRef, db);
-            console.log("☁️ Đã lưu dữ liệu lên mây thành công!");
         } catch (e) {
             console.error("Lỗi khi đồng bộ lên mây: ", e);
         }
@@ -208,7 +193,6 @@ function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 function showLoading(show, text="Đang xử lý...") { document.getElementById('loading-text').innerText = text; document.getElementById('loading-overlay').classList.toggle('hidden', !show); }
 
-// ================= LỊCH ĐIỀU HƯỚNG 4 TAB =================
 function switchCalTab(tabId, el) {
     document.querySelectorAll('#view-calendar .tab-btn').forEach(btn => btn.classList.remove('active'));
     if(el) el.classList.add('active');
@@ -272,7 +256,6 @@ function renderMonthClasses() {
     });
 }
 
-// ================= AUTO SCHEDULING =================
 function isHoliday(dateStr, classId) {
     const d = new Date(dateStr);
     for(let h of db.holidays) {
@@ -304,7 +287,6 @@ function generateSchedules() {
     saveData(); 
 }
 
-// ================= DASHBOARD & QUÉT RÁC TỰ ĐỘNG =================
 function updateDashboard() {
     db.sessions = db.sessions.filter(s => db.classes.some(c => c.id == s.classId)); 
     db.students = db.students.filter(s => db.classes.some(c => c.id == s.classId)); 
@@ -312,7 +294,8 @@ function updateDashboard() {
     db.attendance = db.attendance.filter(a => db.sessions.some(s => String(s.id) === String(a.sessionId)));
     
     document.getElementById('dash-total-classes').innerText = db.classes.length; 
-    document.getElementById('dash-total-students').innerText = db.students.length;
+    // CẬP NHẬT: Không đếm học sinh đã nghỉ ngang vào Tổng số
+    document.getElementById('dash-total-students').innerText = db.students.filter(s => s.status !== 'inactive').length;
     let todayStr = getTodayStr(); document.getElementById('dash-today-date').innerText = parseDateVi(todayStr);
     
     const missedList = document.getElementById('dash-missed-list'); if (missedList) missedList.innerHTML = '';
@@ -330,7 +313,6 @@ function updateDashboard() {
     let todays = db.sessions.filter(s => s.date === todayStr).sort((a,b) => String(a.start||"").localeCompare(String(b.start||"")));
     let activeTodays = todays.filter(s => s.status !== 'canceled'); document.getElementById('dash-today-sessions').innerText = activeTodays.length;
     
-    // Đếm học sinh nợ tiền tự động
     let dueCount = 0;
     db.classes.forEach(c => {
         let tData = getTuitionData(c.id);
@@ -351,7 +333,8 @@ function updateDashboard() {
 
     activeTodays.forEach(s => {
         let cls = db.classes.find(c => c.id == s.classId); if(!cls) return;
-        let stuCount = db.students.filter(st => st.classId == cls.id).length;
+        // CẬP NHẬT: Không đếm học sinh đã nghỉ ngang
+        let stuCount = db.students.filter(st => st.classId == cls.id && st.status !== 'inactive').length;
         let classSessions = db.sessions.filter(x => x.classId == cls.id && x.status !== 'canceled').sort((a,b) => { let d1 = new Date(a.date).getTime(), d2 = new Date(b.date).getTime(); if(d1 !== d2) return d1 - d2; return String(a.start||"").localeCompare(String(b.start||"")); });
         let sessionIndex = classSessions.findIndex(x => String(x.id) === String(s.id)) + 1;
         let isDone = s.status === 'completed'; let startParts = (s.start||"00:00").split(':'); let startMins = parseInt(startParts[0]||0)*60 + parseInt(startParts[1]||0); let isUpcoming = !isDone && (startMins - currentMins <= 60 && startMins - currentMins >= -120);
@@ -361,14 +344,20 @@ function updateDashboard() {
     });
 }
 
-// ================= ĐIỂM DANH =================
 let currentAttSessionId = null;
 function openAttendance(sessionId, className) {
     currentAttSessionId = String(sessionId); const session = db.sessions.find(s => String(s.id) === currentAttSessionId);
     if(!session) return showToast("Không tìm thấy dữ liệu buổi học!", "error");
     document.getElementById('att-class-name').innerText = className; document.getElementById('att-date-info').innerText = `${parseDateVi(session.date)} (${session.start||'--:--'} - ${session.end||'--:--'})`;
     
-    let stus = db.students.filter(s => s.classId == session.classId); let html = '';
+    // CẬP NHẬT: Không hiển thị học sinh đã nghỉ ngang vào danh sách điểm danh
+    let stus = db.students.filter(s => s.classId == session.classId && s.status !== 'inactive'); 
+    let html = '';
+    
+    if(stus.length === 0) {
+        html = '<div style="text-align:center; padding: 20px; color: #64748b;">Chưa có học sinh nào đang học trong lớp này.</div>';
+    }
+    
     stus.forEach(stu => {
         let record = db.attendance.find(a => String(a.sessionId) === currentAttSessionId && a.studentId == stu.id);
         let status = record ? record.status : 'có mặt'; let cl = status === 'vắng' ? 'vắng' : (status === 'phép' ? 'phép' : '');
@@ -389,7 +378,7 @@ function submitAttendance() {
     try {
         let session = db.sessions.find(s => String(s.id) === currentAttSessionId);
         if(!session) throw new Error("Dữ liệu buổi học bị mất, vui lòng tải lại trang!");
-        let stus = db.students.filter(s => s.classId == session.classId);
+        let stus = db.students.filter(s => s.classId == session.classId && s.status !== 'inactive');
         stus.forEach(stu => { let exist = db.attendance.find(a => String(a.sessionId) === currentAttSessionId && a.studentId == stu.id); if(!exist) db.attendance.push({ sessionId: currentAttSessionId, studentId: stu.id, status: 'có mặt' }); });
         
         session.status = 'completed'; saveData(); 
@@ -398,7 +387,7 @@ function submitAttendance() {
     } catch(err) { showToast("Lỗi: " + err.message, "error"); }
 }
 
-// ================= TÀI CHÍNH TỰ ĐỘNG =================
+// ================= TÀI CHÍNH THÔNG MINH =================
 function saveBankSettings() {
     db.settings = db.settings || {};
     db.settings.bankId = document.getElementById('set-bank-id').value.trim() || 'MB';
@@ -406,47 +395,62 @@ function saveBankSettings() {
     saveData(); closeModal('modal-settings'); showToast("Đã lưu cấu hình Ngân hàng!");
 }
 
-// BẢN VÁ: Hàm lấy dữ liệu giữ nguyên Kỳ thu hiện tại của lớp
 function getTuitionData(classId) {
     let result = [];
-    let studentsInClass = db.students.filter(s => s.classId == classId);
+    // CẬP NHẬT: Không tính tiền cho học sinh đã nghỉ ngang
+    let studentsInClass = db.students.filter(s => s.classId == classId && s.status !== 'inactive');
     let cls = db.classes.find(c => c.id == classId);
     if (!cls) return result;
 
     let cycle = parseInt(cls.cycle) || 10;
 
-    // Đếm số buổi đã dạy để xác định "Kỳ thu hiện tại" của LỚP
-    let classSessions = db.sessions.filter(s => s.classId == cls.id && s.status === 'completed').sort((a,b)=> (a.date||"").localeCompare(b.date||""));
-    let totalCompleted = classSessions.length;
-    let currentCycleNum = Math.floor(totalCompleted / cycle) + 1;
+    let allSessions = db.sessions.filter(s => s.classId == cls.id && s.status !== 'canceled').sort((a,b)=> (a.date||"").localeCompare(b.date||""));
+    let completedSessions = allSessions.filter(s => s.status === 'completed');
+    
+    let currentCycleNum = Math.floor(completedSessions.length / cycle) + 1;
+
+    let prevStartIdx = (currentCycleNum - 2) * cycle;
+    let prevEndIdx = (currentCycleNum - 1) * cycle;
+    let prevSessIds = currentCycleNum > 1 ? allSessions.slice(prevStartIdx, prevEndIdx).map(s => String(s.id)) : [];
+
+    let currStartIdx = (currentCycleNum - 1) * cycle;
+    let currEndIdx = currentCycleNum * cycle;
+    let currSessions = allSessions.slice(currStartIdx, currEndIdx);
 
     studentsInClass.forEach(stu => {
         let fee = parseInt(stu.customFee) || parseInt(cls.fee) || 0;
+        let textTru = []; 
 
-        // Khấu trừ phép của đợt ngay trước đó
-        let discountCount = 0;
-        if (currentCycleNum > 1) {
-            let prevStart = (currentCycleNum - 2) * cycle;
-            let prevEnd = (currentCycleNum - 1) * cycle;
-            let prevSessIds = classSessions.slice(prevStart, prevEnd).map(s => String(s.id));
-            discountCount = db.attendance.filter(a => a.studentId == stu.id && a.status === 'phép' && prevSessIds.includes(String(a.sessionId))).length;
+        let phepCount = 0;
+        if (currentCycleNum > 1 && prevSessIds.length > 0) {
+            phepCount = db.attendance.filter(a => a.studentId == stu.id && a.status === 'phép' && prevSessIds.includes(String(a.sessionId))).length;
+            if (phepCount > 0) textTru.push(`${phepCount} phép`);
         }
 
+        let treCount = 0;
+        if (stu.startDate) {
+            treCount = currSessions.filter(s => s.date < stu.startDate).length;
+            if (treCount > 0) textTru.push(`${treCount} vào trễ`);
+        }
+
+        let totalDiscountCount = phepCount + treCount;
         let upfrontFee = cycle * fee;
-        let discountFee = discountCount * fee;
+        let discountFee = totalDiscountCount * fee;
         let finalAmount = upfrontFee - discountFee;
+        if (finalAmount < 0) finalAmount = 0;
 
         let ckContent = `HP ${stu.id}`; 
         let bankId = (db.settings && db.settings.bankId) ? db.settings.bankId : 'MB';
         let bankAcc = (db.settings && db.settings.bankAcc) ? db.settings.bankAcc : '123456789';
         let qrLink = `https://img.vietqr.io/image/${bankId}-${bankAcc}-compact2.png?amount=${finalAmount}&addInfo=${encodeURIComponent(ckContent)}`;
 
-        // Kiểm tra xem học sinh ĐÃ NỘP cho KỲ HIỆN TẠI chưa
         let isPaid = db.tuitions.find(t => t.studentId == stu.id && t.cycleNumber === currentCycleNum) ? true : false;
+        
+        let discountText = textTru.length > 0 ? textTru.join(" + ") : "";
 
         result.push({
             stu: stu, cls: cls, cycleNum: currentCycleNum, cycleSessions: cycle,
-            upfrontFee: upfrontFee, discountCount: discountCount, discountFee: discountFee, 
+            upfrontFee: upfrontFee, discountCount: totalDiscountCount, discountFee: discountFee, discountText: discountText,
             finalAmount: finalAmount, isPaid: isPaid, qrLink: qrLink, ckContent: ckContent
         });
     });
@@ -486,7 +490,7 @@ function renderTuition() {
                     <div style="flex:1;">
                         <h4 style="font-size:1.05rem; color:var(--text-main); font-weight:800; margin-bottom:4px;">${d.stu.name}</h4>
                         <p class="text-sm text-muted">Kỳ ${d.cycleNum} (${d.cycleSessions} buổi)</p>
-                        ${d.discountCount > 0 ? `<p class="text-sm text-red">Trừ ${d.discountCount} buổi phép: -${d.discountFee.toLocaleString()}đ</p>` : ''}
+                        ${d.discountText !== "" ? `<p class="text-sm text-red">Trừ (${d.discountText}): -${d.discountFee.toLocaleString()}đ</p>` : ''}
                     </div>
                     <div style="text-align:right;">
                         <h3 class="text-primary" style="font-size:1.15rem; color:#2563eb; font-weight:800; margin-bottom:6px;">${d.finalAmount.toLocaleString()}đ</h3>
@@ -504,7 +508,6 @@ function renderTuition() {
     const elDaThu = document.getElementById('t-da-thu'); if(elDaThu) elDaThu.innerText = tongDaThu.toLocaleString() + 'đ';
     const elConNo = document.getElementById('t-con-no'); if(elConNo) elConNo.innerText = tongConNo.toLocaleString() + 'đ';
 
-    // Lịch sử thu tiền
     const histList = document.getElementById('tuition-history-list');
     if (histList) {
         histList.innerHTML = '';
@@ -568,10 +571,10 @@ function copyClassNotice() {
     let data = getTuitionData(cid);
     let thangHienTai = new Date().getMonth() + 1;
     
-    let msg = `📢 BẢNG HỌC PHÍ THÁNG ${thangHienTai} - LỚP ${cls.name}\n(Đã tự động khấu trừ các buổi nghỉ có phép kỳ trước):\n\n`;
+    let msg = `📢 BẢNG HỌC PHÍ THÁNG ${thangHienTai} - LỚP ${cls.name}\n(Đã khấu trừ tự động số buổi Phép và Vào trễ):\n\n`;
     data.forEach(d => { 
         if (d.discountCount > 0) {
-            msg += `- ${d.stu.name}: ${d.finalAmount.toLocaleString()}đ (Trừ ${d.discountCount} phép)\n`; 
+            msg += `- ${d.stu.name}: ${d.finalAmount.toLocaleString()}đ (Trừ ${d.discountText})\n`; 
         } else {
             msg += `- ${d.stu.name}: ${d.finalAmount.toLocaleString()}đ\n`; 
         }
@@ -592,7 +595,30 @@ function copyClassNotice() {
 }
 
 // ================= GIAO DIỆN QR VÀ XUẤT ẢNH =================
-function showClassQRList() {
+async function getBase64QR(url) {
+    try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        try {
+            const pRes = await fetch(proxyUrl);
+            const pBlob = await pRes.blob();
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(pBlob);
+            });
+        } catch (e2) { return url; }
+    }
+}
+
+async function showClassQRList() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp!", "error");
     
@@ -605,17 +631,25 @@ function showClassQRList() {
     
     if(data.length === 0) {
         grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px; color:#64748b; font-weight:600;">Tất cả học sinh trong nhóm đã nộp học phí! 🎉</div>';
+        openModal('modal-qr-list');
     } else {
-        data.forEach(d => {
-            grid.innerHTML += `
+        openModal('modal-qr-list'); 
+        showLoading(true, "AI đang nạp ảnh QR chống lỗi..."); 
+        
+        let htmlContent = "";
+        for(let i=0; i<data.length; i++) {
+            let d = data[i];
+            let qrBase64 = await getBase64QR(d.qrLink); 
+            htmlContent += `
                 <div style="background: white; border-radius: 12px; padding: 15px; text-align: center; border: 2px solid #f1f5f9; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <b style="font-size: 1rem; color: #0f172a; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 5px;">${d.stu.name}</b>
                     <p style="font-size: 1.15rem; color: #ef4444; font-weight: 900; margin-bottom: 12px;">${d.finalAmount.toLocaleString()}đ</p>
-                    <img src="${d.qrLink}" crossorigin="anonymous" style="width: 100%; max-width: 180px; border-radius: 8px; border: 1px solid #e2e8f0; padding: 4px; background: white;">
+                    <img src="${qrBase64}" style="width: 100%; max-width: 180px; border-radius: 8px; border: 1px solid #e2e8f0; padding: 4px; background: white;">
                 </div>`;
-        });
+        }
+        grid.innerHTML = htmlContent;
+        showLoading(false); 
     }
-    openModal('modal-qr-list');
 }
 
 function taiAnhQRCaLop() {
@@ -653,7 +687,6 @@ function taiAnhQRCaLop() {
     }, 500);
 }
 
-// BẢN VÁ: TÍNH NĂNG MỚI - XUẤT FILE EXCEL CHUẨN (.XLSX) DÙNG THƯ VIỆN SHEETJS
 function exportTuitionExcel() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp để xuất file!", "error");
@@ -666,20 +699,17 @@ function exportTuitionExcel() {
     }
 
     let excelData = [];
-    
-    // Tạo dòng tiêu đề
-    excelData.push(["STT", "Họ và tên", "Số điện thoại", "Kỳ thu", "Số buổi", "Học phí dự kiến", "Số buổi phép", "Tiền trừ phép", "Tổng cần thu", "Trạng thái"]);
+    excelData.push(["STT", "Họ và tên", "Số điện thoại", "Kỳ thu", "Số buổi", "Học phí dự kiến", "Buổi trừ (Phép/Trễ)", "Tiền trừ", "Tổng cần thu", "Trạng thái"]);
 
-    // Điền dữ liệu từng học sinh
     data.forEach((d, index) => {
         excelData.push([
             index + 1, 
             d.stu.name, 
-            d.stu.phone ? String(d.stu.phone) : "", // Ép kiểu chuỗi để Excel không làm mất số 0 ở đầu SĐT
+            d.stu.phone ? String(d.stu.phone) : "", 
             d.cycleNum, 
             d.cycleSessions, 
             d.upfrontFee, 
-            d.discountCount, 
+            d.discountText || "0", 
             d.discountFee, 
             d.finalAmount, 
             d.isPaid ? "Đã nộp" : "Chưa nộp"
@@ -689,18 +719,9 @@ function exportTuitionExcel() {
     let wb = XLSX.utils.book_new();
     let ws = XLSX.utils.aoa_to_sheet(excelData);
     
-    // Làm đẹp file Excel: Tự động căn chỉnh độ rộng các cột cho vừa vặn chữ
     let wscols = [
-        {wch: 5},  // Cột STT
-        {wch: 25}, // Cột Tên
-        {wch: 15}, // Cột SĐT
-        {wch: 8},  // Kỳ
-        {wch: 10}, // Số buổi
-        {wch: 15}, // HP dự kiến
-        {wch: 15}, // Buổi phép
-        {wch: 15}, // Tiền trừ
-        {wch: 15}, // Tổng thu
-        {wch: 12}  // Trạng thái
+        {wch: 5}, {wch: 25}, {wch: 15}, {wch: 8}, {wch: 10}, 
+        {wch: 15}, {wch: 20}, {wch: 15}, {wch: 15}, {wch: 12}
     ];
     ws['!cols'] = wscols;
 
@@ -714,30 +735,27 @@ function exportTuitionExcel() {
     showToast("✅ Đã xuất file Excel chuẩn (.xlsx) thành công!");
 }
 
-// ================= QUẢN LÝ LỚP HỌC =================
+// ================= QUẢN LÝ LỚP HỌC VÀ TÍNH NĂNG NGHỈ NGANG =================
 function openAddStudentForClass(cid) { document.getElementById('stu-id').value = ''; document.getElementById('stu-name').value = ''; document.getElementById('stu-phone').value = ''; document.getElementById('stu-custom-fee').value = ''; document.getElementById('stu-start').value = getTodayStr(); document.getElementById('stu-class').value = cid; openModal('modal-add-student'); }
 
 function renderClasses() {
     const list = document.getElementById('class-list'); list.innerHTML = '';
-    
     const searchInput = document.getElementById('search-class');
     const filterText = searchInput ? searchInput.value.toLowerCase() : "";
-    
     let filteredClasses = db.classes.filter(c => c.name.toLowerCase().includes(filterText));
     
-    if(filteredClasses.length === 0) {
-        list.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Không tìm thấy nhóm lớp nào!</div>';
-    }
+    if(filteredClasses.length === 0) { list.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Không tìm thấy nhóm lớp nào!</div>'; }
     
     filteredClasses.forEach(c => {
-        let stuCount = db.students.filter(s => s.classId == c.id).length; let tkbText = c.tkb.map(t => `T${t.dayOfWeek}(${t.start})`).join(', ');
+        // CẬP NHẬT: Không đếm học sinh đã nghỉ ngang
+        let stuCount = db.students.filter(s => s.classId == c.id && s.status !== 'inactive').length; 
+        let tkbText = c.tkb.map(t => `T${t.dayOfWeek}(${t.start})`).join(', ');
         let classSessions = db.sessions.filter(x => x.classId == c.id && x.status !== 'canceled').sort((a,b) => { let d1 = new Date(a.date).getTime(), d2 = new Date(b.date).getTime(); if(d1 !== d2) return d1 - d2; return String(a.start||"").localeCompare(String(b.start||"")); });
         let completedCount = classSessions.filter(s => s.status === 'completed').length; let cycle = parseInt(c.cycle) || 10; let nextTargetIndex = Math.floor(completedCount / cycle) * cycle + cycle; 
-        
         let nextDateText = "Chưa xác định";
         if(classSessions.length >= nextTargetIndex) { let nextSess = classSessions[nextTargetIndex - 1]; if(nextSess) nextDateText = parseDateVi(nextSess.date); } else if (classSessions.length > 0) { nextDateText = "Đang lên lịch..."; }
 
-        list.innerHTML += `<div class="sched-card" style="border-left-color: var(--primary);"><div class="sched-info"><h4 style="margin-bottom:6px;">${c.name}</h4><p class="text-sm">Học phí: ${parseInt(c.fee).toLocaleString()}đ/b • Lịch: ${tkbText || 'Chưa xếp'}</p><div style="margin-top:12px; padding:10px 12px; background:#f8fafc; border-radius:10px; border:1px solid #e2e8f0;"><div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.85rem; font-weight:700;"><span style="color:var(--text-main);">Đã dạy: <b class="text-blue">${completedCount}</b> buổi</span><span class="text-muted">Mốc thu: ${cycle}b</span></div><div style="font-size:0.8rem; color:#b45309; font-weight:600; display:flex; align-items:center; gap:6px;"><i class="fas fa-bolt"></i> Dự kiến thu (Buổi ${nextTargetIndex}): ${nextDateText}</div></div></div><div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #e2e8f0; padding-top:12px; margin-top:12px;"><span class="text-sm" style="font-weight:700;"><i class="fas fa-users text-blue"></i> ${stuCount} học sinh</span><div style="display:flex; gap:8px;"><button class="btn-outline-action text-green" onclick="openAddStudentForClass(${c.id})" title="Thêm học sinh"><i class="fas fa-user-plus"></i></button><button class="btn-outline-action text-orange" onclick="editClass(${c.id})" title="Sửa nhóm"><i class="fas fa-pen"></i></button><button class="btn-outline-action text-red" onclick="deleteClass(${c.id})" title="Xóa nhóm"><i class="fas fa-trash"></i></button></div></div></div>`;
+        list.innerHTML += `<div class="sched-card" style="border-left-color: var(--primary);"><div class="sched-info"><h4 style="margin-bottom:6px;">${c.name}</h4><p class="text-sm">Học phí: ${parseInt(c.fee).toLocaleString()}đ/b • Lịch: ${tkbText || 'Chưa xếp'}</p><div style="margin-top:12px; padding:10px 12px; background:#f8fafc; border-radius:10px; border:1px solid #e2e8f0;"><div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.85rem; font-weight:700;"><span style="color:var(--text-main);">Đã dạy: <b class="text-blue">${completedCount}</b> buổi</span><span class="text-muted">Mốc thu: ${cycle}b</span></div><div style="font-size:0.8rem; color:#b45309; font-weight:600; display:flex; align-items:center; gap:6px;"><i class="fas fa-bolt"></i> Dự kiến thu (Buổi ${nextTargetIndex}): ${nextDateText}</div></div></div><div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #e2e8f0; padding-top:12px; margin-top:12px;"><span class="text-sm" style="font-weight:700;"><i class="fas fa-users text-blue"></i> ${stuCount} học sinh đang học</span><div style="display:flex; gap:8px;"><button class="btn-outline-action text-green" onclick="openAddStudentForClass(${c.id})" title="Thêm học sinh"><i class="fas fa-user-plus"></i></button><button class="btn-outline-action text-orange" onclick="editClass(${c.id})" title="Sửa nhóm"><i class="fas fa-pen"></i></button><button class="btn-outline-action text-red" onclick="deleteClass(${c.id})" title="Xóa nhóm"><i class="fas fa-trash"></i></button></div></div></div>`;
     });
     populateClassSelects();
 }
@@ -758,7 +776,7 @@ function populateClassSelects() {
     const formTuit = document.getElementById('tuition-class-select'); if(formTuit && formTuit.options.length === 0) formTuit.innerHTML = htmlForm;
 }
 
-// ================= QUẢN LÝ HỌC SINH =================
+// BẢN VÁ: CẬP NHẬT TÍNH NĂNG NGHỈ NGANG (BẢO LƯU)
 function renderStudents() { 
     const list = document.getElementById('student-list'); 
     list.innerHTML = ''; 
@@ -768,17 +786,45 @@ function renderStudents() {
     
     filtered.forEach(s => { 
         let cls = db.classes.find(c => c.id == s.classId); 
+        let isInactive = s.status === 'inactive';
+        
+        let statusBadge = isInactive 
+            ? `<span style="background:#fee2e2; color:#ef4444; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold; margin-left:8px;">Đã nghỉ</span>`
+            : `<span style="background:#d1fae5; color:#10b981; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold; margin-left:8px;">Đang học</span>`;
+
+        let toggleBtn = isInactive 
+            ? `<button class="btn-outline-action text-green" onclick="toggleStudentStatus(${s.id})" title="Đi học lại"><i class="fas fa-undo"></i></button>`
+            : `<button class="btn-outline-action text-slate" onclick="toggleStudentStatus(${s.id})" title="Báo nghỉ ngang"><i class="fas fa-user-slash"></i></button>`;
+
+        let nameStyle = isInactive ? "text-decoration: line-through; opacity: 0.6;" : "";
+
         list.innerHTML += `<div class="list-item">
             <div class="list-item-info">
-                <strong>${s.name}</strong>
+                <strong style="${nameStyle}">${s.name} ${statusBadge}</strong>
                 <small>${cls ? cls.name : 'Lớp đã xóa'} • ${s.phone || 'Không có SĐT'}</small>
             </div>
             <div style="display:flex; gap:8px;">
+                ${toggleBtn}
                 <button class="btn-outline-action text-orange" onclick="editStudent(${s.id})" title="Sửa học sinh"><i class="fas fa-pen"></i></button>
-                <button class="btn-outline-action text-red" onclick="deleteStudent(${s.id})" title="Xóa học sinh"><i class="fas fa-trash"></i></button>
+                <button class="btn-outline-action text-red" onclick="deleteStudent(${s.id})" title="Xóa vĩnh viễn (Chỉ dùng khi nhập sai tên)"><i class="fas fa-trash"></i></button>
             </div>
         </div>`; 
     }); 
+}
+
+function toggleStudentStatus(id) {
+    let s = db.students.find(x => x.id == id);
+    if(s) {
+        if(s.status === 'inactive') {
+            if(confirm(`Xác nhận cho học sinh ${s.name} ĐI HỌC LẠI?`)) s.status = 'active';
+        } else {
+            if(confirm(`Xác nhận học sinh ${s.name} ĐÃ NGHỈ NGANG?\nHọc sinh sẽ tự động bị ẩn khỏi danh sách Điểm danh và Thu phí của kỳ mới, nhưng dữ liệu cũ vẫn được giữ nguyên cho Kế toán.`)) {
+                s.status = 'inactive';
+            }
+        }
+        saveData();
+        renderStudents();
+    }
 }
 
 function saveStudent() { 
@@ -793,12 +839,16 @@ function saveStudent() {
         name: name, 
         phone: document.getElementById('stu-phone').value, 
         customFee: document.getElementById('stu-custom-fee').value, 
-        startDate: document.getElementById('stu-start').value || getTodayStr() 
+        startDate: document.getElementById('stu-start').value || getTodayStr(),
+        status: 'active'
     };
 
     if(id) {
         let idx = db.students.findIndex(s => s.id == id);
-        if(idx > -1) db.students[idx] = obj;
+        if(idx > -1) {
+            obj.status = db.students[idx].status || 'active'; // Giữ nguyên trạng thái cũ khi sửa
+            db.students[idx] = obj;
+        }
     } else {
         db.students.push(obj); 
     }
@@ -821,7 +871,7 @@ function editStudent(id) {
     openModal('modal-add-student');
 }
 
-function deleteStudent(id) { if(confirm("Xóa học sinh này?")) { db.students = db.students.filter(s => s.id != id); saveData(); renderStudents(); } }
+function deleteStudent(id) { if(confirm("Cảnh báo: Nếu xóa, dữ liệu biên lai cũ cũng sẽ bị mất. Khuyến khích dùng nút 'Báo nghỉ ngang' (Biểu tượng Hình người gạch chéo) thay vì xóa. Bạn vẫn muốn xóa vĩnh viễn?")) { db.students = db.students.filter(s => s.id != id); saveData(); renderStudents(); } }
 
 // ================= LỊCH NGHỈ =================
 function renderHolidays() {
@@ -869,10 +919,8 @@ function parseTableToStudents(rows) {
     if(rows.length < 1) throw new Error("File trống hoặc không dạng bảng!"); 
     
     let headerIdx = -1; 
-    // 1. Quét sâu tới 15 dòng đầu để tìm dòng chứa tiêu đề
     for(let i=0; i<Math.min(15, rows.length); i++) { 
         let text = rows[i].join(' ').toLowerCase(); 
-        // Nhận diện dòng chứa "họ và tên" hoặc "stt"
         if(text.includes('họ') || text.includes('tên') || text.includes('stt')) { 
             headerIdx = i; 
             break; 
@@ -881,17 +929,13 @@ function parseTableToStudents(rows) {
     if(headerIdx === -1) headerIdx = 0; 
     
     let headers = rows[headerIdx].map(h => String(h).toLowerCase().trim()); 
-    
-    // 2. BỘ NHẬN DIỆN THÔNG MINH (Cập nhật từ khóa cho file của TT)
     let nameCol = headers.findIndex(h => h.includes('tên') || h.includes('name')); 
-    // Thêm từ khóa 'đt' để bắt chính xác cột "Sô ĐT PH" của bạn
     let phoneCol = headers.findIndex(h => h.includes('sđt') || h.includes('thoại') || h.includes('phone') || h.includes('đt')); 
     let feeCol = headers.findIndex(h => h.includes('phí') || h.includes('tiền')); 
     
     if(nameCol === -1) nameCol = 1; 
     parsedData = [];
 
-    // 3. Đọc dữ liệu học sinh
     for(let i = headerIdx + 1; i < rows.length; i++) { 
         let r = rows[i]; 
         if(!r || r.length < nameCol+1) continue; 
@@ -908,7 +952,6 @@ function parseTableToStudents(rows) {
     
     if(parsedData.length === 0) throw new Error("Không tìm thấy dữ liệu học sinh!"); 
     
-    // 4. Hiển thị bảng xác nhận (Có thêm CSS để ô nhập liệu đẹp hơn)
     document.getElementById('import-step-1').classList.add('hidden'); 
     document.getElementById('import-step-2').classList.remove('hidden'); 
     document.getElementById('import-footer').classList.remove('hidden'); 
@@ -924,7 +967,7 @@ function parseTableToStudents(rows) {
     });
 }
 
-function confirmImport() { let cid = document.getElementById('import-class-select').value; let count = 0; parsedData.forEach((s, i) => { let finalName = document.getElementById(`imp-name-${i}`).value.trim(); if(finalName) { db.students.push({ id: Date.now() + i, classId: parseInt(cid), name: finalName, phone: document.getElementById(`imp-phone-${i}`).value, customFee: document.getElementById(`imp-fee-${i}`).value, startDate: getTodayStr() }); count++; } }); saveData(); closeModal('modal-import'); renderStudents(); showToast(`🎉 Đã nhập ${count} học sinh!`); }
+function confirmImport() { let cid = document.getElementById('import-class-select').value; let count = 0; parsedData.forEach((s, i) => { let finalName = document.getElementById(`imp-name-${i}`).value.trim(); if(finalName) { db.students.push({ id: Date.now() + i, classId: parseInt(cid), name: finalName, phone: document.getElementById(`imp-phone-${i}`).value, customFee: document.getElementById(`imp-fee-${i}`).value, startDate: getTodayStr(), status: 'active' }); count++; } }); saveData(); closeModal('modal-import'); renderStudents(); showToast(`🎉 Đã nhập ${count} học sinh!`); }
 
 // ================= THỐNG KÊ & BÁO CÁO =================
 function renderStatistics() {
@@ -936,6 +979,7 @@ function renderStatistics() {
     let classStats = {};
     db.classes.forEach(c => {
         classStats[c.id] = { name: c.name, expected: 0, collected: 0, stuCount: 0 };
+        // LƯU Ý: Vẫn giữ lại học sinh đã nghỉ để tính đúng doanh thu kỳ vọng cũ của TT
         let stus = db.students.filter(s => s.classId == c.id);
         classStats[c.id].stuCount = stus.length;
         
@@ -973,7 +1017,7 @@ function renderStatistics() {
             list.innerHTML += `
                 <div class="list-item" style="flex-direction: column; align-items: stretch; gap: 10px;">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <strong style="font-size: 1.05rem; color: var(--text-main);">${cls.name} <span class="text-sm text-muted" style="font-weight:600;">(${cls.stuCount} HS)</span></strong>
+                        <strong style="font-size: 1.05rem; color: var(--text-main);">${cls.name} <span class="text-sm text-muted" style="font-weight:600;">(Tổng ${cls.stuCount} HS)</span></strong>
                         <strong class="text-green">+${cls.collected.toLocaleString()}đ</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-muted); font-weight:700;">
@@ -1001,6 +1045,7 @@ window.renderStudents = renderStudents;
 window.deleteStudent = deleteStudent;
 window.saveStudent = saveStudent;
 window.editStudent = editStudent;
+window.toggleStudentStatus = toggleStudentStatus; // Nút bảo lưu
 window.editClass = editClass;
 window.deleteClass = deleteClass;
 window.saveClass = saveClass;
