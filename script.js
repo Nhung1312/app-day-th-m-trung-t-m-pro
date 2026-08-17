@@ -587,6 +587,7 @@ function copyClassNotice() {
     });
 }
 
+// CẬP NHẬT: Giao diện lưới QR có ảnh Watermark và Tiêu đề
 function showClassQRList() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp!", "error");
@@ -603,6 +604,7 @@ function showClassQRList() {
         grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; padding:30px; color:#64748b; font-weight:600;">Tất cả học sinh trong nhóm đã nộp học phí! 🎉</div>';
     } else {
         data.forEach(d => {
+            // LƯU Ý: crossorigin="anonymous" đã được thêm vào
             grid.innerHTML += `
                 <div style="background: white; border-radius: 12px; padding: 15px; text-align: center; border: 2px solid #f1f5f9; box-shadow: 0 4px 6px rgba(0,0,0,0.02);">
                     <b style="font-size: 1rem; color: #0f172a; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 5px;">${d.stu.name}</b>
@@ -614,26 +616,31 @@ function showClassQRList() {
     openModal('modal-qr-list');
 }
 
+// TÍNH NĂNG MỚI: Chụp và tải ảnh QR cả lớp
 function taiAnhQRCaLop() {
     const exportArea = document.getElementById('qr-export-area');
     const clsName = document.getElementById('qr-export-title').innerText.replace('BẢNG MÃ QR HỌC PHÍ - ', '');
     
     showLoading(true, "AI đang xử lý ghép ảnh, vui lòng đợi...");
     
+    // Thả nổi chiều cao để chụp được toàn bộ ảnh dài dù bị khuất cuộn chuột
     const originalMaxHeight = exportArea.style.maxHeight;
     const originalOverflow = exportArea.style.overflow;
     exportArea.style.maxHeight = 'none';
     exportArea.style.overflow = 'visible';
 
+    // Đợi 0.5s để các ảnh load xong rồi chụp
     setTimeout(() => {
         html2canvas(exportArea, {
-            useCORS: true,       
-            scale: 2,            
+            useCORS: true,       // Bắt buộc để đọc được link ảnh từ vietqr
+            scale: 2,            // Giúp ảnh nét gấp đôi
             backgroundColor: "#ffffff"
         }).then(canvas => {
+            // Trả lại giao diện cuộn chuột như cũ
             exportArea.style.maxHeight = originalMaxHeight;
             exportArea.style.overflow = originalOverflow;
 
+            // Tự động tải xuống
             const link = document.createElement('a');
             let thangHienTai = new Date().getMonth() + 1;
             link.download = `ToanMatsuda_QR_HocPhi_${clsName}_T${thangHienTai}.png`;
@@ -649,7 +656,7 @@ function taiAnhQRCaLop() {
     }, 500);
 }
 
-// TÍNH NĂNG MỚI: XUẤT FILE EXCEL (CSV) THU TIỀN THEO LỚP
+// TÍNH NĂNG MỚI: XUẤT FILE EXCEL CHUẨN (.XLSX) DÙNG THƯ VIỆN SHEETJS
 function exportTuitionExcel() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp để xuất file!", "error");
@@ -661,39 +668,59 @@ function exportTuitionExcel() {
         return showToast("Không có dữ liệu học sinh trong lớp này!", "error");
     }
 
-    // Tạo nội dung CSV (Sử dụng \ufeff để Excel nhận diện được Tiếng Việt có dấu)
-    let csvContent = "\ufeff";
-    csvContent += "STT,Họ và tên,Số điện thoại,Kỳ thu,Số buổi,Học phí dự kiến,Số buổi phép,Tiền trừ phép,Tổng cần thu,Trạng thái\n";
+    // Tạo mảng dữ liệu chuẩn bị cho Excel
+    let excelData = [];
+    
+    // Tạo dòng tiêu đề
+    excelData.push(["STT", "Họ và tên", "Số điện thoại", "Kỳ thu", "Số buổi", "Học phí dự kiến", "Số buổi phép", "Tiền trừ phép", "Tổng cần thu", "Trạng thái"]);
 
+    // Điền dữ liệu từng học sinh
     data.forEach((d, index) => {
-        let stt = index + 1;
-        let ten = `"${d.stu.name}"`;
-        let sdt = `"${d.stu.phone || ''}"`;
-        let ky = d.cycleNum;
-        let soBuoi = d.cycleSessions;
-        let hpDuKien = d.upfrontFee;
-        let phep = d.discountCount;
-        let tienTru = d.discountFee;
-        let tongThu = d.finalAmount;
-        let trangThai = d.isPaid ? "Đã nộp" : "Chưa nộp";
-
-        csvContent += `${stt},${ten},${sdt},${ky},${soBuoi},${hpDuKien},${phep},${tienTru},${tongThu},${trangThai}\n`;
+        excelData.push([
+            index + 1, 
+            d.stu.name, 
+            d.stu.phone ? String(d.stu.phone) : "", // Ép kiểu chuỗi để Excel không làm mất số 0 ở đầu SĐT
+            d.cycleNum, 
+            d.cycleSessions, 
+            d.upfrontFee, 
+            d.discountCount, 
+            d.discountFee, 
+            d.finalAmount, 
+            d.isPaid ? "Đã nộp" : "Chưa nộp"
+        ]);
     });
 
-    // Tạo link tải file tự động
-    let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    let url = URL.createObjectURL(blob);
-    let link = document.createElement("a");
-    link.setAttribute("href", url);
+    // Tạo một Workbook (file Excel) mới
+    let wb = XLSX.utils.book_new();
     
-    let thangHienTai = new Date().getMonth() + 1;
-    link.setAttribute("download", `DanhSachThuTien_${cls.name}_Thang${thangHienTai}.csv`);
+    // Chuyển mảng dữ liệu thành một Worksheet (trang tính)
+    let ws = XLSX.utils.aoa_to_sheet(excelData);
     
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    // Làm đẹp file Excel: Tự động căn chỉnh độ rộng các cột cho vừa vặn chữ
+    let wscols = [
+        {wch: 5},  // Cột STT
+        {wch: 25}, // Cột Tên
+        {wch: 15}, // Cột SĐT
+        {wch: 8},  // Kỳ
+        {wch: 10}, // Số buổi
+        {wch: 15}, // HP dự kiến
+        {wch: 15}, // Buổi phép
+        {wch: 15}, // Tiền trừ
+        {wch: 15}, // Tổng thu
+        {wch: 12}  // Trạng thái
+    ];
+    ws['!cols'] = wscols;
 
-    showToast("✅ Đã xuất file thành công!");
+    // Gắn trang tính vào file Excel
+    XLSX.utils.book_append_sheet(wb, ws, "Danh Sach Thu Tien");
+
+    // Xuất file và tự động tải xuống
+    let thangHienTai = new Date().getMonth() + 1;
+    let fileName = `DanhSachThuTien_${cls.name.replace(/ /g, '_')}_Thang${thangHienTai}.xlsx`;
+    
+    XLSX.writeFile(wb, fileName);
+    
+    showToast("✅ Đã xuất file Excel chuẩn (.xlsx) thành công!");
 }
 
 // ================= QUẢN LÝ LỚP HỌC =================
