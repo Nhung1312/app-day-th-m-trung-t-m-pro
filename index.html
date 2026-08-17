@@ -36,7 +36,6 @@
                     </div>
                 </header>
 
-                <!-- BANNER CẢNH BÁO HẾT HẠN DÙNG THỬ -->
                 <div id="trial-warning-banner" style="display: none; background: linear-gradient(135deg, #f59e0b, #d97706); padding: 16px 20px; border-radius: 18px; color: white; margin-bottom: 20px; box-shadow: 0 8px 20px rgba(245, 158, 11, 0.3); align-items: center; justify-content: space-between;">
                     <div style="flex: 1; padding-right: 15px;">
                         <strong style="display: block; font-size: 1.05rem; margin-bottom: 6px; text-shadow: 0 1px 2px rgba(0,0,0,0.2);">
@@ -116,11 +115,12 @@
                     </div>
                 </div>
 
-                <!-- ĐÃ BỔ SUNG NÚT XUẤT EXCEL TẠI ĐÂY -->
-                <div class="action-buttons mb-15" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
-                    <button class="btn-primary" style="padding: 10px 5px; font-size: 0.85rem;" onclick="copyClassNotice()"><i class="fas fa-copy"></i> Zalo Lớp</button>
-                    <button class="btn-primary" style="background:#10b981; padding: 10px 5px; font-size: 0.85rem;" onclick="showClassQRList()"><i class="fas fa-qrcode"></i> Lưới QR</button>
-                    <button class="btn-primary" style="background:#f59e0b; padding: 10px 5px; font-size: 0.85rem;" onclick="exportTuitionExcel()"><i class="fas fa-file-excel"></i> Xuất File</button>
+                <!-- CẬP NHẬT: Giao diện 4 nút bao gồm Đồng bộ SePay -->
+                <div class="action-buttons mb-15" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                    <button class="btn-primary" style="padding: 10px 2px; font-size: 0.8rem;" onclick="copyClassNotice()"><i class="fas fa-copy"></i> Zalo Lớp</button>
+                    <button class="btn-primary" style="background:#10b981; padding: 10px 2px; font-size: 0.8rem;" onclick="showClassQRList()"><i class="fas fa-qrcode"></i> Lưới QR</button>
+                    <button class="btn-primary" style="background:#f59e0b; padding: 10px 2px; font-size: 0.8rem;" onclick="exportTuitionExcel()"><i class="fas fa-file-excel"></i> Xuất File</button>
+                    <button class="btn-primary" style="background:#8b5cf6; padding: 10px 2px; font-size: 0.8rem; box-shadow: 0 4px 10px rgba(139,92,246,0.3);" onclick="syncSePay()"><i class="fas fa-sync-alt"></i> SePay</button>
                 </div>
 
                 <div class="section-title"><h3>Danh sách thu phí (Đầu kỳ)</h3></div>
@@ -208,7 +208,6 @@
     
     <div id="modal-add-makeup" class="modal"><div class="modal-content"><div class="modal-header"><h3>Thêm Lịch Dạy Bù</h3><div class="close" onclick="closeModal('modal-add-makeup')"><i class="fas fa-times"></i></div></div><div class="modal-body"><div class="input-group"><label>Chọn nhóm lớp *</label><select id="makeup-class"></select></div><div class="form-row"><div class="input-group"><label>Ngày dạy bù *</label><input type="date" id="makeup-date"></div></div><div class="form-row"><div class="input-group"><label>Từ giờ *</label><input type="time" id="makeup-start" value="18:00"></div><div class="input-group"><label>Đến giờ *</label><input type="time" id="makeup-end" value="20:00"></div></div><div class="input-group mb-0"><label>Ghi chú</label><input type="text" id="makeup-note" placeholder="VD: Bù cho ngày lễ"></div></div><div class="modal-footer"><button class="btn-primary w-full" onclick="saveMakeup()">Lưu Dạy Bù</button></div></div></div>
 
-    <!-- Modal Lưới QR Lớp CẬP NHẬT MỚI -->
     <div id="modal-qr-list" class="modal">
         <div class="modal-content" style="max-height: 95vh; background: #f8fafc; width: 100%; max-width: 600px;">
             <div class="modal-header">
@@ -218,9 +217,7 @@
             <div class="modal-body" style="padding: 15px; overflow-y: auto;">
                 <button class="btn-primary w-full mb-15" onclick="taiAnhQRCaLop()" style="background: #10b981; font-size: 1.1rem; padding: 15px; box-shadow: 0 4px 10px rgba(16,185,129,0.3);"><i class="fas fa-download"></i> TẢI ẢNH QR CẢ LỚP CHẤT LƯỢNG CAO</button>
                 
-                <!-- Khu vực bao bọc riêng để chụp ảnh -->
                 <div id="qr-export-area" style="background: #ffffff; padding: 20px; border-radius: 16px; position: relative; overflow: hidden; border: 1px solid #e2e8f0;">
-                    <!-- Logo / Tên thương hiệu in chìm (Watermark) -->
                     <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-30deg); font-size: 4rem; color: rgba(37, 99, 235, 0.04); font-weight: 900; white-space: nowrap; pointer-events: none; z-index: 0;">TOÁN MATSUDA</div>
                     
                     <h2 id="qr-export-title" style="text-align: center; color: #1e3a8a; margin-bottom: 20px; font-weight: 800; font-size: 1.3rem; position: relative; z-index: 1;"></h2>
@@ -235,7 +232,7 @@
         </div>
     </div>
 
-    <!-- Modal Cài đặt & Ngân hàng -->
+    <!-- Modal Cài đặt & Ngân hàng (ĐÃ THÊM MỤC SEPAY) -->
     <div id="modal-settings" class="modal">
         <div class="modal-content">
             <div class="modal-header"><h3>⚙️ Cài đặt & Dữ liệu</h3><div class="close" onclick="closeModal('modal-settings')"><i class="fas fa-times"></i></div></div>
@@ -243,7 +240,13 @@
                 <div class="section-title"><h4>Cấu hình Ngân Hàng (VietQR)</h4></div>
                 <div class="input-group"><label>Mã Ngân Hàng (VD: MB, VCB, TCB)</label><input type="text" id="set-bank-id" value="MB"></div>
                 <div class="input-group"><label>Số Tài Khoản</label><input type="text" id="set-bank-acc" value="123456789"></div>
-                <button class="btn-primary w-full mb-20" onclick="saveBankSettings()">Lưu Cấu Hình Ngân Hàng</button>
+                
+                <hr style="border: 1px solid #e2e8f0; margin-bottom: 15px;">
+                <div class="section-title" style="margin-bottom: 5px;"><h4 style="color: #8b5cf6;">Tự động hóa SePay (Qua Google Sheets)</h4></div>
+                <div class="alert-item green mb-15 text-sm" style="padding: 10px;">Dán link Google Sheets (Định dạng CSV) của SePay vào đây để App tự động quét và gạch nợ hàng loạt.</div>
+                <div class="input-group"><label>Link File CSV SePay</label><input type="text" id="set-sepay-link" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv"></div>
+                
+                <button class="btn-primary w-full mb-20" onclick="saveBankSettings()">Lưu Cấu Hình</button>
                 
                 <hr style="border: 1px solid #e2e8f0; margin-bottom: 20px;">
                 <div class="section-title"><h4>Dữ liệu Hệ thống</h4></div>
@@ -334,7 +337,6 @@
         <button onclick="logoutApp()" style="margin-top: 20px; padding: 10px 20px; background: transparent; border: 1px solid #cbd5e1; color: #64748b; border-radius: 10px; font-weight: 700; cursor: pointer;">Đăng xuất tài khoản</button>
     </div>
 
-    <!-- Thư viện chụp ảnh màn hình chất lượng cao -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script type="module" src="script.js"></script>
 </body>
