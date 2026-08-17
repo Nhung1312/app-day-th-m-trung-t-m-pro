@@ -762,9 +762,62 @@ async function extractWord(file) { const data = await file.arrayBuffer(); const 
 async function extractImageOCR(file) { if(typeof Tesseract === 'undefined') throw new Error("Thư viện OCR chưa tải xong!"); showLoading(true, "AI đang quét ảnh. Vui lòng đợi 5-15s..."); const result = await Tesseract.recognize(file, 'vie'); parseTableToStudents(result.data.text.split('\n').filter(l => l.trim().length > 0).map(l => l.split(/ {2,}|\t/))); }
 
 function parseTableToStudents(rows) {
-    if(rows.length < 1) throw new Error("File trống hoặc không dạng bảng!"); let headerIdx = -1; for(let i=0; i<Math.min(5, rows.length); i++) { let text = rows[i].join(' ').toLowerCase(); if(text.includes('họ') || text.includes('tên') || text.includes('name')) { headerIdx = i; break; } } if(headerIdx === -1) headerIdx = 0; let headers = rows[headerIdx].map(h => String(h).toLowerCase().trim()); let nameCol = headers.findIndex(h => h.includes('tên') || h.includes('name')); let phoneCol = headers.findIndex(h => h.includes('sđt') || h.includes('thoại') || h.includes('phone')); let feeCol = headers.findIndex(h => h.includes('phí') || h.includes('tiền')); if(nameCol === -1) nameCol = 1; 
-    for(let i = headerIdx + 1; i < rows.length; i++) { let r = rows[i]; if(!r || r.length < nameCol+1) continue; let name = String(r[nameCol] || '').trim(); if(name.length < 2 || !isNaN(name) || name.toLowerCase().includes('tổng')) continue; parsedData.push({ name, phone: phoneCol !== -1 ? String(r[phoneCol] || '').replace(/[^0-9]/g,'') : '', customFee: feeCol !== -1 ? String(r[feeCol] || '').replace(/[^0-9]/g,'') : '' }); }
-    if(parsedData.length === 0) throw new Error("Không tìm thấy dữ liệu học sinh!"); document.getElementById('import-step-1').classList.add('hidden'); document.getElementById('import-step-2').classList.remove('hidden'); document.getElementById('import-footer').classList.remove('hidden'); let tb = document.getElementById('import-preview-body'); tb.innerHTML = ''; parsedData.forEach((s, i) => { tb.innerHTML += `<tr><td><input type="text" id="imp-name-${i}" value="${s.name}"></td><td><input type="text" id="imp-phone-${i}" value="${s.phone}"></td><td><input type="number" id="imp-fee-${i}" value="${s.customFee}" placeholder="Mặc định"></td></tr>`; });
+    if(rows.length < 1) throw new Error("File trống hoặc không dạng bảng!"); 
+    
+    let headerIdx = -1; 
+    // 1. Quét sâu tới 15 dòng đầu để tìm dòng chứa tiêu đề
+    for(let i=0; i<Math.min(15, rows.length); i++) { 
+        let text = rows[i].join(' ').toLowerCase(); 
+        // Nhận diện dòng chứa "họ và tên" hoặc "stt"
+        if(text.includes('họ') || text.includes('tên') || text.includes('stt')) { 
+            headerIdx = i; 
+            break; 
+        } 
+    } 
+    if(headerIdx === -1) headerIdx = 0; 
+    
+    let headers = rows[headerIdx].map(h => String(h).toLowerCase().trim()); 
+    
+    // 2. BỘ NHẬN DIỆN THÔNG MINH (Cập nhật từ khóa cho file của TT)
+    let nameCol = headers.findIndex(h => h.includes('tên') || h.includes('name')); 
+    // Thêm từ khóa 'đt' để bắt chính xác cột "Sô ĐT PH" của bạn
+    let phoneCol = headers.findIndex(h => h.includes('sđt') || h.includes('thoại') || h.includes('phone') || h.includes('đt')); 
+    let feeCol = headers.findIndex(h => h.includes('phí') || h.includes('tiền')); 
+    
+    if(nameCol === -1) nameCol = 1; 
+    parsedData = [];
+
+    // 3. Đọc dữ liệu học sinh
+    for(let i = headerIdx + 1; i < rows.length; i++) { 
+        let r = rows[i]; 
+        if(!r || r.length < nameCol+1) continue; 
+        
+        let name = String(r[nameCol] || '').trim(); 
+        if(name.length < 2 || !isNaN(name) || name.toLowerCase().includes('tổng')) continue; 
+        
+        parsedData.push({ 
+            name: name, 
+            phone: phoneCol !== -1 ? String(r[phoneCol] || '').replace(/[^0-9]/g,'') : '', 
+            customFee: feeCol !== -1 ? String(r[feeCol] || '').replace(/[^0-9]/g,'') : '' 
+        }); 
+    }
+    
+    if(parsedData.length === 0) throw new Error("Không tìm thấy dữ liệu học sinh!"); 
+    
+    // 4. Hiển thị bảng xác nhận (Có thêm CSS để ô nhập liệu đẹp hơn)
+    document.getElementById('import-step-1').classList.add('hidden'); 
+    document.getElementById('import-step-2').classList.remove('hidden'); 
+    document.getElementById('import-footer').classList.remove('hidden'); 
+    
+    let tb = document.getElementById('import-preview-body'); 
+    tb.innerHTML = ''; 
+    parsedData.forEach((s, i) => { 
+        tb.innerHTML += `<tr>
+            <td><input type="text" id="imp-name-${i}" value="${s.name}" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-family: inherit;"></td>
+            <td><input type="text" id="imp-phone-${i}" value="${s.phone}" placeholder="Trống" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-family: inherit;"></td>
+            <td><input type="number" id="imp-fee-${i}" value="${s.customFee}" placeholder="Mặc định" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:4px; font-family: inherit;"></td>
+        </tr>`; 
+    });
 }
 
 function confirmImport() { let cid = document.getElementById('import-class-select').value; let count = 0; parsedData.forEach((s, i) => { let finalName = document.getElementById(`imp-name-${i}`).value.trim(); if(finalName) { db.students.push({ id: Date.now() + i, classId: parseInt(cid), name: finalName, phone: document.getElementById(`imp-phone-${i}`).value, customFee: document.getElementById(`imp-fee-${i}`).value, startDate: getTodayStr() }); count++; } }); saveData(); closeModal('modal-import'); renderStudents(); showToast(`🎉 Đã nhập ${count} học sinh!`); }
