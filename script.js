@@ -1,4 +1,4 @@
-// --- HỆ THỐNG FIREBASE ĐĂNG NHẬP VÀ ĐỒNG BỘ DOANH NGHIỆP ---
+// --- HỆ THỐNG FIREBASE & ĐỒNG BỘ DOANH NGHIỆP ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, collection, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -17,6 +17,46 @@ const auth = getAuth(app);
 const firestoreDb = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
+// =========================================================================
+// TỐI ƯU HÓA 1: CƠ SỞ DỮ LIỆU TỐC ĐỘ CAO (INDEXEDDB)
+// Loại bỏ localStorage (giới hạn 5MB) để cân mượt 10.000+ học sinh
+// =========================================================================
+const IDB = {
+    db: null,
+    init: function() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('TutoringDB_Enterprise', 1);
+            req.onupgradeneeded = (e) => { e.target.result.createObjectStore('store'); };
+            req.onsuccess = (e) => { this.db = e.target.result; resolve(); };
+            req.onerror = (e) => reject(e);
+        });
+    },
+    get: function(key) {
+        return new Promise((resolve, reject) => {
+            if (!this.db) return resolve(null);
+            const tx = this.db.transaction('store', 'readonly');
+            const req = tx.objectStore('store').get(key);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject();
+        });
+    },
+    set: function(key, val) {
+        return new Promise((resolve, reject) => {
+            if (!this.db) return resolve();
+            const tx = this.db.transaction('store', 'readwrite');
+            const req = tx.objectStore('store').put(val, key);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject();
+        });
+    }
+};
+
+const idbReady = IDB.init(); // Khởi tạo kho dữ liệu nội bộ ngay lập tức
+
+const defaultData = { classes: [], students: [], holidays: [], sessions: [], attendance: [], tuitions: [], processedTx: [], settings: { bankId: 'MB', bankAcc: '123456789', sepayLink: '' } };
+let db = JSON.parse(JSON.stringify(defaultData));
+
+// --- ĐĂNG NHẬP ---
 const loginScreen = document.getElementById('login-screen');
 const btnLogin = document.getElementById('btn-login');
 
@@ -33,11 +73,11 @@ let lastSyncedDb = null;
 let syncTimeout = null;
 
 onAuthStateChanged(auth, async (user) => {
+    await idbReady; // Đợi bộ nhớ tốc độ cao sẵn sàng
     if (user) {
         currentUser = user;
         loginScreen.style.display = 'none';
-        console.log("Đã đăng nhập:", user.email);
-
+        
         const userRef = doc(firestoreDb, 'nguoi_dung', user.uid);
         let hasAccess = true; 
 
@@ -86,16 +126,12 @@ onAuthStateChanged(auth, async (user) => {
     }
 });
 
-window.logoutApp = function() {
+window.logoutApp = async function() {
     if(confirm("Bạn có chắc chắn muốn đăng xuất khỏi thiết bị này?")) {
-        signOut(auth).then(() => { localStorage.removeItem('tutoringData'); location.reload(); });
+        await IDB.set('tutoringData', null); 
+        signOut(auth).then(() => { location.reload(); });
     }
 };
-
-const defaultData = { classes: [], students: [], holidays: [], sessions: [], attendance: [], tuitions: [], processedTx: [], settings: { bankId: 'MB', bankAcc: '123456789', sepayLink: '' } };
-let stored = JSON.parse(localStorage.getItem('tutoringData'));
-let db = stored ? Object.assign({}, defaultData, stored) : defaultData;
-db.classes = db.classes || []; db.students = db.students || []; db.holidays = db.holidays || []; db.sessions = db.sessions || []; db.attendance = db.attendance || []; db.tuitions = db.tuitions || []; db.processedTx = db.processedTx || []; db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789', sepayLink: '' };
 
 // --- HỆ THỐNG ĐỒNG BỘ THÔNG MINH (SMART SYNC ENGINE) ---
 async function loadDataFromProCloud(uid) {
@@ -106,7 +142,7 @@ async function loadDataFromProCloud(uid) {
         const metaDoc = await getDoc(doc(firestoreDb, `UsersPro/${uid}/config`, 'meta'));
 
         if (!metaDoc.exists() && legacyDoc.exists()) {
-            console.log("Đang chuyển đổi dữ liệu cũ sang chuẩn Doanh nghiệp...");
+            console.log("Đang chuyển đổi dữ liệu sang chuẩn Doanh nghiệp...");
             db = Object.assign({}, defaultData, legacyDoc.data());
             lastSyncedDb = JSON.parse(JSON.stringify(defaultData)); 
             await smartSyncToFirebase(uid); 
@@ -123,24 +159,22 @@ async function loadDataFromProCloud(uid) {
         }
 
         lastSyncedDb = JSON.parse(JSON.stringify(db));
-        localStorage.setItem('tutoringData', JSON.stringify(db));
+        await IDB.set('tutoringData', db); 
 
         if (typeof updateDashboard === 'function') updateDashboard();
-        if (typeof renderClasses === 'function') renderClasses();
-        if (document.getElementById('view-tuition')?.classList.contains('active') && typeof renderTuition === 'function') renderTuition();
-        if (document.getElementById('view-statistics')?.classList.contains('active') && typeof renderStatistics === 'function') renderStatistics();
+        renderClasses();
+        if (document.getElementById('view-tuition')?.classList.contains('active')) renderTuition();
+        if (document.getElementById('view-statistics')?.classList.contains('active')) renderStatistics();
         
         document.getElementById('set-bank-id').value = db.settings.bankId || 'MB';
         document.getElementById('set-bank-acc').value = db.settings.bankAcc || '123456789';
         document.getElementById('set-sepay-link').value = db.settings.sepayLink || '';
-    } catch(e) {
-        console.error("Lỗi tải dữ liệu: ", e);
-    }
+    } catch(e) { console.error("Lỗi tải dữ liệu: ", e); }
     showLoading(false);
 }
 
 async function saveData() {
-    localStorage.setItem('tutoringData', JSON.stringify(db));
+    await IDB.set('tutoringData', db); 
     if (typeof updateDashboard === 'function') updateDashboard();
     
     if (currentUser) {
@@ -197,8 +231,8 @@ async function smartSyncToFirebase(uid) {
         } catch(e) { console.error("Lỗi đồng bộ: ", e); }
     }
 }
-// --- KẾT THÚC PHẦN FIREBASE ---
 
+// --- CÁC HÀM TIỆN ÍCH ---
 function getTodayStr() { return new Date().toISOString().split('T')[0]; }
 function parseDateVi(dStr) { 
     if(!dStr) return '--/--';
@@ -208,7 +242,16 @@ function parseDateVi(dStr) {
     return `${dd}/${mm}`; 
 }
 
-window.onload = () => { 
+window.onload = async () => { 
+    await idbReady;
+    const stored = await IDB.get('tutoringData');
+    if (stored) {
+        db = Object.assign({}, defaultData, stored);
+        db.classes = db.classes || []; db.students = db.students || []; db.holidays = db.holidays || [];
+        db.sessions = db.sessions || []; db.attendance = db.attendance || []; db.tuitions = db.tuitions || [];
+        db.processedTx = db.processedTx || []; db.settings = db.settings || { bankId: 'MB', bankAcc: '123456789', sepayLink: '' };
+    }
+
     generateSchedules(); updateDashboard(); renderClasses(); populateClassSelects(); 
     
     document.getElementById('set-bank-id').value = db.settings.bankId || 'MB';
@@ -564,7 +607,7 @@ function renderTuition() {
         histList.innerHTML = '';
         let sortedTuitions = [...db.tuitions].sort((a, b) => b.id - a.id).slice(0, 30); 
         if(sortedTuitions.length === 0) {
-            histList.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Chưa có lịch sự thu tiền.</div>';
+            histList.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Chưa có lịch sử thu tiền.</div>';
         } else {
             sortedTuitions.forEach(t => {
                 let stu = db.students.find(s => s.id == t.studentId);
@@ -602,7 +645,6 @@ function deleteTuition(id) {
     }
 }
 
-// BẢN VÁ: TÍNH NĂNG ĐỒNG BỘ SEPAY TỰ ĐỘNG
 async function syncSePay() {
     let link = db.settings && db.settings.sepayLink;
     if(!link || !link.includes('pub?output=csv')) {
@@ -622,12 +664,10 @@ async function syncSePay() {
         for(let i=1; i<rows.length; i++) { 
             let rowText = rows[i].toUpperCase();
 
-            // Tìm cú pháp HP [ID]
             let match = rowText.match(/HP\s*(\d+)/);
             if(match) {
                 let stuId = parseInt(match[1]);
 
-                // Tạo chuỗi băm để làm ID chống trùng lặp (giữ 60 ký tự đầu của dòng giao dịch)
                 let txHash = encodeURIComponent(rowText.substring(0, 60)).replace(/[^a-zA-Z0-9]/g, '');
 
                 if(!db.processedTx.includes(txHash)) {
@@ -636,7 +676,6 @@ async function syncSePay() {
                         let cData = getTuitionData(stu.classId);
                         let d = cData.find(x => x.stu.id == stuId);
 
-                        // Chỉ gạch nợ nếu học sinh chưa nộp kỳ hiện tại
                         if(d && !d.isPaid) {
                             db.tuitions.push({
                                 id: Date.now() + Math.floor(Math.random()*1000),
@@ -713,19 +752,17 @@ function copyClassNotice() {
     });
 }
 
-// ================= XUẤT PHIẾU THU PDF HÀNG LOẠT (TỐI ƯU CHO ZALO) =================
 function showClassQRList() {
     let cid = document.getElementById('tuition-class-select').value;
     if(!cid) return showToast("Chưa chọn nhóm lớp!", "error");
     
     let cls = db.classes.find(c => c.id == cid);
-    let data = getTuitionData(cid).filter(d => !d.isPaid); // Chỉ tạo phiếu cho những bạn CHƯA NỘP
+    let data = getTuitionData(cid).filter(d => !d.isPaid); 
     
     if(data.length === 0) return showToast("Tất cả học sinh lớp này đã nộp đủ! 🎉", "success");
 
     showToast("Đang tạo Phiếu báo PDF, vui lòng đợi...");
 
-    // Mở một tab mới để tạo tài liệu in
     let printWindow = window.open('', '_blank');
     let thangHienTai = new Date().getMonth() + 1;
     
@@ -736,7 +773,6 @@ function showClassQRList() {
         <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800;900&display=swap" rel="stylesheet">
         <style>
             body { font-family: 'Plus Jakarta Sans', sans-serif; margin: 0; padding: 0; background: #e2e8f0; }
-            /* Cài đặt mỗi học sinh là 1 trang in */
             .page { page-break-after: always; width: 100%; height: 100vh; display: flex; align-items: center; justify-content: center; background: white; }
             .invoice-box { border: 2px dashed #cbd5e1; border-radius: 20px; padding: 40px; text-align: center; width: 90%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.05); }
             .header { color: #1e3a8a; font-size: 24px; font-weight: 900; margin-bottom: 5px; text-transform: uppercase; }
@@ -746,8 +782,6 @@ function showClassQRList() {
             .details { text-align: left; background: #f8fafc; padding: 15px 20px; border-radius: 12px; margin-bottom: 25px; font-size: 15px; color: #334155; border: 1px solid #e2e8f0; }
             .qr-container img { width: 260px; height: 260px; border-radius: 16px; border: 1px solid #e2e8f0; padding: 10px; background: white; }
             .footer-text { margin-top: 25px; font-size: 14px; color: #64748b; font-weight: 600; line-height: 1.5; }
-            
-            /* Tắt background thừa khi lưu PDF */
             @media print {
                 body { background: white; }
                 .invoice-box { border: 2px dashed #cbd5e1; box-shadow: none; width: 100%; max-width: none; margin: 0 auto; }
@@ -757,7 +791,6 @@ function showClassQRList() {
     <body>
     `;
 
-    // Lặp qua từng học sinh chưa nộp để tạo trang
     data.forEach(d => {
         let discountHtml = d.discountCount > 0 
             ? `<div style="color:#ef4444; margin-top:8px; font-weight:800;">Trừ (${d.discountText}): -${d.discountFee.toLocaleString()}đ</div>` 
@@ -768,20 +801,15 @@ function showClassQRList() {
             <div class="invoice-box">
                 <div class="header">THÔNG BÁO HỌC PHÍ</div>
                 <div class="sub-header">Nhóm lớp: <b>${cls.name}</b> • Kỳ thu: <b>${d.cycleNum}</b></div>
-                
                 <div class="student-name">${d.stu.name}</div>
-                
                 <div class="details">
                     <div><strong>Học phí gốc:</strong> ${d.upfrontFee.toLocaleString()}đ (${d.cycleSessions} buổi)</div>
                     ${discountHtml}
                 </div>
-                
                 <div class="amount">${d.finalAmount.toLocaleString()}đ</div>
-                
                 <div class="qr-container">
                     <img src="${d.qrLink}" alt="QR Code">
                 </div>
-                
                 <div class="footer-text">
                     📌 Phụ huynh vui lòng lưu ảnh mã QR trên và dùng App Ngân hàng quét để thanh toán tự động.<br>
                     <span style="color:#ef4444;">(Cú pháp đã được tạo sẵn, KHÔNG thay đổi nội dung CK)</span>
@@ -791,7 +819,6 @@ function showClassQRList() {
         `;
     });
 
-    // Tự động bật hộp thoại In/Lưu PDF sau 1.5 giây (Chờ load xong ảnh QR)
     html += `
         <script>
             setTimeout(() => { 
@@ -865,25 +892,35 @@ function openAddStudentForClass(cid) {
     openModal('modal-add-student'); 
 }
 
+// =========================================================================
+// TỐI ƯU HÓA 2: CHỐNG TRỄ NHỊP (DEBOUNCE) KHI TÌM KIẾM
+// Loại bỏ tình trạng giật màn hình khi gõ tên học sinh/lớp học
+// =========================================================================
+let renderClassesTimer;
 function renderClasses() {
-    const list = document.getElementById('class-list'); list.innerHTML = '';
-    const searchInput = document.getElementById('search-class');
-    const filterText = searchInput ? searchInput.value.toLowerCase() : "";
-    let filteredClasses = db.classes.filter(c => c.name.toLowerCase().includes(filterText));
-    
-    if(filteredClasses.length === 0) { list.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Không tìm thấy nhóm lớp nào!</div>'; }
-    
-    filteredClasses.forEach(c => {
-        let stuCount = db.students.filter(s => s.classId == c.id && s.status !== 'inactive').length; 
-        let tkbText = c.tkb.map(t => `T${t.dayOfWeek}(${t.start})`).join(', ');
-        let classSessions = db.sessions.filter(x => x.classId == c.id && x.status !== 'canceled').sort((a,b) => { let d1 = new Date(a.date).getTime(), d2 = new Date(b.date).getTime(); if(d1 !== d2) return d1 - d2; return String(a.start||"").localeCompare(String(b.start||"")); });
-        let completedCount = classSessions.filter(s => s.status === 'completed').length; let cycle = parseInt(c.cycle) || 10; let nextTargetIndex = Math.floor(completedCount / cycle) * cycle + cycle; 
-        let nextDateText = "Chưa xác định";
-        if(classSessions.length >= nextTargetIndex) { let nextSess = classSessions[nextTargetIndex - 1]; if(nextSess) nextDateText = parseDateVi(nextSess.date); } else if (classSessions.length > 0) { nextDateText = "Đang lên lịch..."; }
+    clearTimeout(renderClassesTimer);
+    renderClassesTimer = setTimeout(() => {
+        const list = document.getElementById('class-list'); 
+        if(!list) return;
+        list.innerHTML = '';
+        const searchInput = document.getElementById('search-class');
+        const filterText = searchInput ? searchInput.value.toLowerCase() : "";
+        let filteredClasses = db.classes.filter(c => c.name.toLowerCase().includes(filterText));
+        
+        if(filteredClasses.length === 0) { list.innerHTML = '<div class="text-center text-muted" style="padding:20px;">Không tìm thấy nhóm lớp nào!</div>'; }
+        
+        filteredClasses.forEach(c => {
+            let stuCount = db.students.filter(s => s.classId == c.id && s.status !== 'inactive').length; 
+            let tkbText = c.tkb.map(t => `T${t.dayOfWeek}(${t.start})`).join(', ');
+            let classSessions = db.sessions.filter(x => x.classId == c.id && x.status !== 'canceled').sort((a,b) => { let d1 = new Date(a.date).getTime(), d2 = new Date(b.date).getTime(); if(d1 !== d2) return d1 - d2; return String(a.start||"").localeCompare(String(b.start||"")); });
+            let completedCount = classSessions.filter(s => s.status === 'completed').length; let cycle = parseInt(c.cycle) || 10; let nextTargetIndex = Math.floor(completedCount / cycle) * cycle + cycle; 
+            let nextDateText = "Chưa xác định";
+            if(classSessions.length >= nextTargetIndex) { let nextSess = classSessions[nextTargetIndex - 1]; if(nextSess) nextDateText = parseDateVi(nextSess.date); } else if (classSessions.length > 0) { nextDateText = "Đang lên lịch..."; }
 
-        list.innerHTML += `<div class="sched-card" style="border-left-color: var(--primary);"><div class="sched-info"><h4 style="margin-bottom:6px;">${c.name}</h4><p class="text-sm">Học phí: ${parseInt(c.fee).toLocaleString()}đ/b • Lịch: ${tkbText || 'Chưa xếp'}</p><div style="margin-top:12px; padding:10px 12px; background:#f8fafc; border-radius:10px; border:1px solid #e2e8f0;"><div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.85rem; font-weight:700;"><span style="color:var(--text-main);">Đã dạy: <b class="text-blue">${completedCount}</b> buổi</span><span class="text-muted">Mốc thu: ${cycle}b</span></div><div style="font-size:0.8rem; color:#b45309; font-weight:600; display:flex; align-items:center; gap:6px;"><i class="fas fa-bolt"></i> Dự kiến thu (Buổi ${nextTargetIndex}): ${nextDateText}</div></div></div><div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #e2e8f0; padding-top:12px; margin-top:12px;"><span class="text-sm" style="font-weight:700;"><i class="fas fa-users text-blue"></i> ${stuCount} học sinh đang học</span><div style="display:flex; gap:8px;"><button class="btn-outline-action text-green" onclick="openAddStudentForClass(${c.id})" title="Thêm học sinh"><i class="fas fa-user-plus"></i></button><button class="btn-outline-action text-orange" onclick="editClass(${c.id})" title="Sửa nhóm"><i class="fas fa-pen"></i></button><button class="btn-outline-action text-red" onclick="deleteClass(${c.id})" title="Xóa nhóm"><i class="fas fa-trash"></i></button></div></div></div>`;
-    });
-    populateClassSelects();
+            list.innerHTML += `<div class="sched-card" style="border-left-color: var(--primary);"><div class="sched-info"><h4 style="margin-bottom:6px;">${c.name}</h4><p class="text-sm">Học phí: ${parseInt(c.fee).toLocaleString()}đ/b • Lịch: ${tkbText || 'Chưa xếp'}</p><div style="margin-top:12px; padding:10px 12px; background:#f8fafc; border-radius:10px; border:1px solid #e2e8f0;"><div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.85rem; font-weight:700;"><span style="color:var(--text-main);">Đã dạy: <b class="text-blue">${completedCount}</b> buổi</span><span class="text-muted">Mốc thu: ${cycle}b</span></div><div style="font-size:0.8rem; color:#b45309; font-weight:600; display:flex; align-items:center; gap:6px;"><i class="fas fa-bolt"></i> Dự kiến thu (Buổi ${nextTargetIndex}): ${nextDateText}</div></div></div><div style="display:flex; justify-content:space-between; align-items:center; border-top:1px solid #e2e8f0; padding-top:12px; margin-top:12px;"><span class="text-sm" style="font-weight:700;"><i class="fas fa-users text-blue"></i> ${stuCount} học sinh đang học</span><div style="display:flex; gap:8px;"><button class="btn-outline-action text-green" onclick="openAddStudentForClass(${c.id})" title="Thêm học sinh"><i class="fas fa-user-plus"></i></button><button class="btn-outline-action text-orange" onclick="editClass(${c.id})" title="Sửa nhóm"><i class="fas fa-pen"></i></button><button class="btn-outline-action text-red" onclick="deleteClass(${c.id})" title="Xóa nhóm"><i class="fas fa-trash"></i></button></div></div></div>`;
+        });
+        populateClassSelects();
+    }, 150); // Chờ 0.15s sau khi gõ xong mới render
 }
 
 function deleteClass(id) { if(confirm("CẢNH BÁO ĐỎ: Xóa nhóm lớp sẽ XÓA VĨNH VIỄN toàn bộ dữ liệu của lớp này. Bạn chắc chắn chứ?")) { db.classes = db.classes.filter(c => c.id != id); saveData(); renderClasses(); showToast("Đã xóa nhóm lớp!"); } }
@@ -902,39 +939,44 @@ function populateClassSelects() {
     const formTuit = document.getElementById('tuition-class-select'); if(formTuit && formTuit.options.length === 0) formTuit.innerHTML = htmlForm;
 }
 
+let renderStudentTimer;
 function renderStudents() { 
-    const list = document.getElementById('student-list'); 
-    list.innerHTML = ''; 
-    let txt = document.getElementById('search-student').value.toLowerCase(); 
-    let cid = document.getElementById('filter-class-stu').value; 
-    let filtered = db.students.filter(s => s.name.toLowerCase().includes(txt) && (cid === '' || s.classId == cid)); 
-    
-    filtered.forEach(s => { 
-        let cls = db.classes.find(c => c.id == s.classId); 
-        let isInactive = s.status === 'inactive';
+    clearTimeout(renderStudentTimer);
+    renderStudentTimer = setTimeout(() => {
+        const list = document.getElementById('student-list'); 
+        if(!list) return;
+        list.innerHTML = ''; 
+        let txt = document.getElementById('search-student') ? document.getElementById('search-student').value.toLowerCase() : ''; 
+        let cid = document.getElementById('filter-class-stu') ? document.getElementById('filter-class-stu').value : ''; 
+        let filtered = db.students.filter(s => s.name.toLowerCase().includes(txt) && (cid === '' || s.classId == cid)); 
         
-        let statusBadge = isInactive 
-            ? `<span style="background:#fee2e2; color:#ef4444; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold; margin-left:8px;">Đã nghỉ</span>`
-            : `<span style="background:#d1fae5; color:#10b981; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold; margin-left:8px;">Đang học</span>`;
+        filtered.forEach(s => { 
+            let cls = db.classes.find(c => c.id == s.classId); 
+            let isInactive = s.status === 'inactive';
+            
+            let statusBadge = isInactive 
+                ? `<span style="background:#fee2e2; color:#ef4444; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold; margin-left:8px;">Đã nghỉ</span>`
+                : `<span style="background:#d1fae5; color:#10b981; padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:bold; margin-left:8px;">Đang học</span>`;
 
-        let toggleBtn = isInactive 
-            ? `<button class="btn-outline-action text-green" onclick="toggleStudentStatus(${s.id})" title="Đi học lại"><i class="fas fa-undo"></i></button>`
-            : `<button class="btn-outline-action text-slate" onclick="toggleStudentStatus(${s.id})" title="Báo nghỉ ngang"><i class="fas fa-user-slash"></i></button>`;
+            let toggleBtn = isInactive 
+                ? `<button class="btn-outline-action text-green" onclick="toggleStudentStatus(${s.id})" title="Đi học lại"><i class="fas fa-undo"></i></button>`
+                : `<button class="btn-outline-action text-slate" onclick="toggleStudentStatus(${s.id})" title="Báo nghỉ ngang"><i class="fas fa-user-slash"></i></button>`;
 
-        let nameStyle = isInactive ? "text-decoration: line-through; opacity: 0.6;" : "";
+            let nameStyle = isInactive ? "text-decoration: line-through; opacity: 0.6;" : "";
 
-        list.innerHTML += `<div class="list-item">
-            <div class="list-item-info">
-                <strong style="${nameStyle}">${s.name} ${statusBadge}</strong>
-                <small>${cls ? cls.name : 'Lớp đã xóa'} • ${s.phone || 'Không có SĐT'}</small>
-            </div>
-            <div style="display:flex; gap:8px;">
-                ${toggleBtn}
-                <button class="btn-outline-action text-orange" onclick="editStudent(${s.id})" title="Sửa học sinh"><i class="fas fa-pen"></i></button>
-                <button class="btn-outline-action text-red" onclick="deleteStudent(${s.id})" title="Xóa vĩnh viễn (Chỉ dùng khi nhập sai tên)"><i class="fas fa-trash"></i></button>
-            </div>
-        </div>`; 
-    }); 
+            list.innerHTML += `<div class="list-item">
+                <div class="list-item-info">
+                    <strong style="${nameStyle}">${s.name} ${statusBadge}</strong>
+                    <small>${cls ? cls.name : 'Lớp đã xóa'} • ${s.phone || 'Không có SĐT'}</small>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    ${toggleBtn}
+                    <button class="btn-outline-action text-orange" onclick="editStudent(${s.id})" title="Sửa học sinh"><i class="fas fa-pen"></i></button>
+                    <button class="btn-outline-action text-red" onclick="deleteStudent(${s.id})" title="Xóa vĩnh viễn"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>`; 
+        }); 
+    }, 150); // Chờ 0.15s
 }
 
 function toggleStudentStatus(id) {
@@ -943,7 +985,7 @@ function toggleStudentStatus(id) {
         if(s.status === 'inactive') {
             if(confirm(`Xác nhận cho học sinh ${s.name} ĐI HỌC LẠI?`)) s.status = 'active';
         } else {
-            if(confirm(`Xác nhận học sinh ${s.name} ĐÃ NGHỈ NGANG?\nHọc sinh sẽ tự động bị ẩn khỏi danh sách Điểm danh và Thu phí của kỳ mới, nhưng dữ liệu cũ vẫn được giữ nguyên cho Kế toán.`)) {
+            if(confirm(`Xác nhận học sinh ${s.name} ĐÃ NGHỈ NGANG?\nHọc sinh sẽ tự động bị ẩn khỏi danh sách Điểm danh và Thu phí của kỳ mới.`)) {
                 s.status = 'inactive';
             }
         }
@@ -1000,7 +1042,7 @@ function editStudent(id) {
     openModal('modal-add-student');
 }
 
-function deleteStudent(id) { if(confirm("Cảnh báo: Nếu xóa, dữ liệu biên lai cũ cũng sẽ bị mất. Khuyến khích dùng nút 'Báo nghỉ ngang' (Biểu tượng Hình người gạch chéo) thay vì xóa. Bạn vẫn muốn xóa vĩnh viễn?")) { db.students = db.students.filter(s => s.id != id); saveData(); renderStudents(); } }
+function deleteStudent(id) { if(confirm("Cảnh báo: Xóa vĩnh viễn sẽ mất cả lịch sử biên lai. Bạn vẫn muốn xóa?")) { db.students = db.students.filter(s => s.id != id); saveData(); renderStudents(); } }
 
 function renderHolidays() {
     const list = document.getElementById('holiday-list'); list.innerHTML = '';
@@ -1182,6 +1224,7 @@ function renderStatistics() {
     }
 }
 
+// KHAI BÁO BIẾN TOÀN CỤC ĐỂ GỌI TỪ HTML
 window.switchView = switchView;
 window.switchCalTab = switchCalTab;
 window.openModal = openModal;
